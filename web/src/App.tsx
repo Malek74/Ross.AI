@@ -133,7 +133,7 @@ export default function App() {
 
   return (
     <AppCtx.Provider value={{ lang, theme, s }}>
-      <div className="h-screen flex" style={{ background: "var(--bg)" }}>
+      <div className="h-screen w-full flex" style={{ background: "var(--bg)" }}>
         {/* Main chat area */}
         <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300`}>
           <TopBar lang={lang} theme={theme} onLangChange={setLang} onThemeChange={setTheme} />
