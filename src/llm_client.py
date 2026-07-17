@@ -128,6 +128,8 @@ def chat(
     str
         The assistant's text content.
     """
+    from src.cost_tracker import tracker
+
     client = get_client()
     resp = client.chat.completions.create(
         model=model or settings.llm_model,
@@ -137,6 +139,7 @@ def chat(
         extra_body=settings.extra_body,
         **kwargs,
     )
+    tracker.record(resp, endpoint="chat")
     return resp.choices[0].message.content or ""
 
 
@@ -179,6 +182,8 @@ def embed(
     list[list[float]]
         One embedding vector per input text, in the same order.
     """
+    from src.cost_tracker import tracker
+
     client = get_client()
 
     emb_model = model or settings.embedding_model
@@ -199,7 +204,8 @@ def embed(
             except APIConnectionError as e:
                 print(f"Connection error! Retrying in 10 seconds... ({e})")
                 time.sleep(10)
-        
+
+        tracker.record(resp, endpoint="embedding")
         # Sort by index to guarantee order (OpenRouter may reorder).
         ordered = sorted(resp.data, key=lambda x: x.index if x.index is not None else 0)
         all_vectors.extend(item.embedding for item in ordered)

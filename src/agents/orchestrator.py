@@ -9,6 +9,7 @@ from typing import Any, Literal
 from src.agents.classifier import classify_domains
 from src.agents.registry import REGISTRY
 from src.agents.synthesizer import synthesize_flags
+from src.cost_tracker import tracker
 from src.llm_client import get_client, settings
 from src.prompt_templates import ORCHESTRATOR_SYSTEM, ORCHESTRATOR_USER
 
@@ -78,6 +79,7 @@ class ParalegalOrchestrator:
                 max_tokens=2048,
                 extra_body=settings.extra_body,
             )
+            tracker.record(response, endpoint="orchestrator")
             message = response.choices[0].message
             if message.content:
                 final_text = message.content

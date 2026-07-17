@@ -15,6 +15,7 @@ from api.schemas import AuditOptions, ChatRequest, DraftRequest, ReviseRequest
 from src.agents.orchestrator import ParalegalOrchestrator
 from src.agents.registry import get_agent, list_agents
 from src.contract_loader import load_contract
+from src.cost_tracker import tracker
 
 app = FastAPI(title="Ross.AI Egyptian-Law Contract Auditor", version="0.1.0")
 
@@ -155,6 +156,11 @@ def draft(request: DraftRequest) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=f"The {request.domain} specialist corpus index is not available.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/cost")
+def cost_summary() -> dict[str, Any]:
+    return tracker.summary()
 
 
 @app.get("/export/{doc_id}")

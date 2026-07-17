@@ -9,6 +9,7 @@ from typing import Any, Literal
 import yaml
 
 from src.agents.tools import DomainTools
+from src.cost_tracker import tracker
 from src.embeddings import DomainIndex
 from src.llm_client import get_client, settings
 from src.prompt_templates import (
@@ -106,6 +107,7 @@ class DomainAgent:
                 model=settings.llm_model, messages=messages, tools=tools.definitions(mode=mode),
                 tool_choice="auto", temperature=0.0, max_tokens=2048, extra_body=settings.extra_body,
             )
+            tracker.record(response, endpoint=f"specialist:{self.name}")
             message = response.choices[0].message
             if message.content:
                 final_text = message.content
