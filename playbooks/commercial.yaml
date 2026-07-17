@@ -1,0 +1,138 @@
+playbook_id: egypt_commercial_contract_validity_v1
+version: "0.1-draft"
+source: "Egyptian Commercial Code (Law 17/1999) — articles from dataflare/egypt-legal-corpus"
+
+# ─────────────────────────────────────────────────────────────────
+# ⚠️  HACKATHON v1 draft — not legal advice.
+#   Article numbers reference the Commercial Code (Law 17/1999)
+#   unless otherwise noted.
+#
+#   LABEL BRIDGE:
+#     ENTAILED       ->  contract COMPLIES with the rule
+#     CONTRADICTED   ->  contract VIOLATES the rule
+#     NOT_MENTIONED  ->  contract is SILENT on the rule
+# ─────────────────────────────────────────────────────────────────
+
+global_defaults:
+  evidence_required_for: ["ENTAILED", "CONTRADICTED"]
+  label_to_status:
+    ENTAILED: compliant
+    CONTRADICTED: violation
+    NOT_MENTIONED: not_addressed
+  label_to_default_decision:
+    ENTAILED:      { severity: LOW,    action: ACCEPT }
+    CONTRADICTED:  { severity: HIGH,   action: ESCALATE }
+    NOT_MENTIONED: { severity: MEDIUM, action: CLARIFY }
+
+criticality_tiers:
+  P0: "Goes to whether the contract or transaction is valid at all"
+  P1: "Materially affects enforceability or merchant obligations"
+  P2: "Good-practice / context-dependent"
+
+checks:
+  # ── COMMERCIAL CHARACTER / الصفة التجارية ───────────────────────
+  - check_id: COM-01
+    title_en: "Applicable law regime"
+    title_ar: "النظام القانوني الواجب التطبيق"
+    article_ref: "Art. 2-3"
+    rule: "Commercial matters are governed first by the parties' agreement, then the Commercial Code, then commercial custom, then the Civil Code. If a contract is commercial for only one party, commercial rules apply only to that party's obligations (Art. 3)."
+    criticality: P1
+
+  - check_id: COM-02
+    title_en: "Merchant status and obligations"
+    title_ar: "صفة التاجر والتزاماته"
+    article_ref: "Art. 10-11"
+    rule: "A merchant is any person who engages in commercial acts professionally. Merchants must maintain commercial books, register in the commercial register, and comply with commercial customs."
+    criticality: P1
+
+  # ── COMMERCIAL BOOKS / الدفاتر التجارية ─────────────────────────
+  - check_id: COM-03
+    title_en: "Commercial books requirement"
+    title_ar: "الدفاتر التجارية الإلزامية"
+    article_ref: "Art. 21-28"
+    rule: "Every merchant must keep commercial books (journal, ledger, inventory/balance sheet). Books must be consecutively numbered, stamped, and free of erasures. Non-compliance weakens evidentiary standing."
+    criticality: P2
+
+  # ── PROOF IN COMMERCIAL MATTERS / الإثبات ───────────────────────
+  - check_id: COM-04
+    title_en: "Freedom of proof in commercial matters"
+    title_ar: "حرية الإثبات في المواد التجارية"
+    article_ref: "Art. 69"
+    rule: "Commercial obligations may be proved by all means including witnesses and correspondence, regardless of amount. However, proof against a written document requires a written counter-document."
+    criticality: P2
+
+  # ── COMMERCIAL SALE / البيع التجاري ─────────────────────────────
+  - check_id: COM-05
+    title_en: "Delivery obligations in commercial sale"
+    title_ar: "التزامات التسليم في البيع التجاري"
+    article_ref: "Art. 88-96"
+    rule: "The seller must deliver goods conforming to the contract in quality and quantity. The buyer must inspect goods promptly upon receipt and notify the seller of defects within a reasonable time or lose the right to claim."
+    criticality: P1
+
+  - check_id: COM-06
+    title_en: "Buyer's inspection and rejection rights"
+    title_ar: "حق المشتري في الفحص والرفض"
+    article_ref: "Art. 97-104"
+    rule: "The buyer who fails to inspect or notify defects within the contractual or customary period is deemed to have accepted the goods. Latent defects must be notified within 15 days of discovery."
+    criticality: P1
+
+  # ── COMMERCIAL AGENCY / الوكالة التجارية ────────────────────────
+  - check_id: COM-07
+    title_en: "Commercial agent scope and authority"
+    title_ar: "نطاق وسلطة الوكيل التجاري"
+    article_ref: "Art. 148-163"
+    rule: "A commercial agent acts on behalf of the principal. The agent must not exceed the scope of authority. Acts beyond authority do not bind the principal unless ratified. The agent owes a duty of care and accounting."
+    criticality: P1
+
+  - check_id: COM-08
+    title_en: "Commission agent (al-amil bil-umula)"
+    title_ar: "العمل بالعمولة"
+    article_ref: "Art. 164-177"
+    rule: "A commission agent contracts in their own name but on the principal's account. The agent is personally liable to third parties. Must follow the principal's instructions and account for profits."
+    criticality: P1
+
+  # ── COMMERCIAL ESTABLISHMENT / المحل التجاري ────────────────────
+  - check_id: COM-09
+    title_en: "Sale of commercial establishment"
+    title_ar: "بيع المحل التجاري"
+    article_ref: "Art. 19-20"
+    rule: "Sale of a commercial establishment must include its intangible elements (clientele, trade name, lease rights). A non-competition clause is implied unless excluded. The seller must notify creditors."
+    criticality: P0
+
+  # ── NEGOTIABLE INSTRUMENTS / الأوراق التجارية ───────────────────
+  - check_id: COM-10
+    title_en: "Bill of exchange formal requirements"
+    title_ar: "البيانات الإلزامية في الكمبيالة"
+    article_ref: "Art. 378-382"
+    rule: "A bill of exchange must contain: the word 'bill of exchange', an unconditional order to pay, the drawee's name, maturity date, place of payment, payee's name, date and place of drawing, and the drawer's signature. Missing mandatory elements void the instrument."
+    criticality: P0
+
+  - check_id: COM-11
+    title_en: "Promissory note requirements"
+    title_ar: "البيانات الإلزامية في السند الإذني"
+    article_ref: "Art. 468-471"
+    rule: "A promissory note must contain: the term 'promissory note', an unconditional promise to pay, maturity date, place of payment, payee's name, date and place of issue, and the maker's signature."
+    criticality: P0
+
+  - check_id: COM-12
+    title_en: "Cheque formal requirements"
+    title_ar: "البيانات الإلزامية في الشيك"
+    article_ref: "Art. 473-485"
+    rule: "A cheque must contain: the word 'cheque', an unconditional order to pay, the drawee bank's name, place of payment, date and place of issue, and the drawer's signature. A cheque is always payable on demand."
+    criticality: P0
+
+  # ── LIMITATION / التقادم ────────────────────────────────────────
+  - check_id: COM-13
+    title_en: "Commercial limitation period"
+    title_ar: "التقادم التجاري"
+    article_ref: "Art. 68"
+    rule: "Commercial obligations prescribe after 7 years unless a shorter period is specified by law. For supply contracts and certain services, shorter periods may apply."
+    criticality: P2
+
+  # ── PUBLIC ORDER / النظام العام ─────────────────────────────────
+  - check_id: COM-14
+    title_en: "Mandatory rules and public order"
+    title_ar: "القواعد الآمرة والنظام العام"
+    article_ref: "Art. 2"
+    rule: "Agreements between parties and commercial customs cannot override public order in Egypt. Clauses contrary to mandatory rules are void even if commercially customary."
+    criticality: P0

@@ -171,7 +171,17 @@ def _chunk_document(law_text: str, law_name: str, domain: str) -> list[dict]:
 # Mapping of Arabic law names to internal domain keys
 _DOMAIN_FILTER: dict[str, list[str]] = {
     "labour": ["قانون العمل", "العمل 14"],
-    "commercial": ["قانون التجارة"],
+    "commercial": [
+        "التجارة بوجه عام",
+        "الالتزامات والعقود التجارية",
+        "الأوراق التجارية",
+        "الاوراق التجارية",
+        "المحل التجارى",
+        "الاثبات فى المواد التجارية",
+        "الدفاتر التجارية",
+        "الشركات التجارية",
+        "قانون التجارة",
+    ],
     "criminal": ["قانون العقوبات", "الإجراءات الجنائية"],
     "civil_procedure": ["قانون المرافعات", "قانون الإثبات"],
     "rent": ["قانون الايجارات", "قانون الإيجار"],

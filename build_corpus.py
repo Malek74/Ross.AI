@@ -63,7 +63,10 @@ def run_smoke_test(domain: str, queries: list[str] | None = None) -> None:
             "الأجر والراتب",                                # Wage and salary
         ],
         "commercial": [
-            "الشركة التجارية",                              # Commercial company
+            "الأوراق التجارية الكمبيالة",                   # Bills of exchange
+            "بيع المحل التجاري",                             # Sale of commercial establishment
+            "الوكالة التجارية",                              # Commercial agency
+            "التزامات التاجر",                               # Merchant obligations
         ],
     }
     queries = queries or default_queries.get(domain, ["عقد"])
