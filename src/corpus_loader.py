@@ -262,6 +262,65 @@ def load_dataflare(domain: str) -> list[Article]:
     return articles
 
 
+# ── Official Labour PDF / Eval datasets (DECISIONS.md B7) ─────────────────────
+
+def load_official_labour_pdf(pdf_path: Path) -> list[Article]:
+    """
+    Extract articles from the official Ministry of Labour Law 14/2025 PDF.
+    Used to supplement or correct the dataflare corpus to ensure currency.
+    """
+    import fitz  # pymupdf
+    logger.info("Extracting official Labour Law 14/2025 from %s", pdf_path)
+    
+    if not pdf_path.exists():
+        logger.warning("Official Labour PDF not found at %s. Skipping.", pdf_path)
+        return []
+
+    doc = fitz.open(pdf_path)
+    full_text = []
+    for page in doc:
+        full_text.append(page.get_text())
+    doc.close()
+    
+    raw_text = "\n".join(full_text)
+    raw_text = clean_ocr(raw_text)
+    
+    # We chunk it using the same header pattern
+    chunks = _chunk_document(raw_text, "قانون العمل 14 لسنة 2025", "labour")
+    articles: list[Article] = []
+    for chunk in chunks:
+        raw_ar = chunk["text_ar"]
+        articles.append(
+            {
+                "id": f"labour-official-14-2025-{chunk['number']}",
+                "number": chunk["number"],
+                "domain": "labour",
+                "text_ar": normalize_document(raw_ar),
+                "text_en": "",
+                "raw_ar": raw_ar,
+                "source": "official_labour_pdf",
+            }
+        )
+    logger.info("  Produced %d article chunks from official PDF.", len(articles))
+    return articles
+
+
+def load_eval_dataset(repo_id: str = "tarekys5/egyptian_legal_v2") -> list[dict]:
+    """
+    Load an evaluation dataset (e.g., IRAC-style question/answers) for testing.
+    As per decisions, this is kept OUTSIDE the statute index.
+    """
+    from datasets import load_dataset  # type: ignore
+    
+    logger.info("Loading eval dataset from %s ...", repo_id)
+    ds = load_dataset(repo_id, split="train")
+    
+    # Just return as a list of dictionaries for the orchestrator/evaluator to use
+    eval_data = [row for row in ds]
+    logger.info("  Loaded %d evaluation records.", len(eval_data))
+    return eval_data
+
+
 # ── Persistence ───────────────────────────────────────────────────────────────
 
 def save_corpus(articles: list[Article], path: Path) -> None:
