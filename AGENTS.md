@@ -9,7 +9,7 @@
 
 We are building an **Egyptian-law compliance auditor**: feed it a contract, and it flags clauses that violate or are unenforceable under the **Egyptian Civil Code (Law 131/1948)**, each flag citing the specific article in **Arabic and English**, with the exact offending quote from the contract.
 
-It is **not** an open "ask me anything about Egyptian law" chatbot. The scoped, demo-legible product is a document-in / cited-risk-report-out audit engine, plus a follow-up chat over the same document.
+It is **not** an ungrounded "ask me anything about Egyptian law" chatbot. The scoped, demo-legible product is a document-in / cited-risk-report-out audit engine, plus a grounded legal-chat mode. In chat mode, a specialist answers questions about the submitted document and, when the question is broader, only from articles retrieved from that specialist's own statute corpus. Every legal answer must distinguish the contract facts from the statute and cite its supporting article; it must say when the available document or corpus does not support a definite answer.
 
 **Framing = an AI paralegal.** An orchestrator triages the document and routes it to domain specialists (Civil live in v1; others stubbed), then synthesizes one cited memo. See §2.1. This is a pitch upgrade over a single-domain checker without expanding what must actually work in 30h.
 
@@ -25,7 +25,7 @@ This is a **remix of an existing repo** (`github.com/Malek74/Exhibit-A-I`, an ND
 Target contract (PDF/DOCX/TXT)
     │  ingest + Arabic normalization + clause segmentation
     ▼
-Clauses + GOAL ("audit this contract under <domain> law; produce a cited risk report")
+Clauses or user question + GOAL ("audit this contract under <domain> law and produce a cited risk report; or answer the user's legal question with grounded citations")
     │
     ▼
         SPECIALIST AGENT  — an LLM in a loop, autonomous over its own steps
@@ -39,8 +39,8 @@ Clauses + GOAL ("audit this contract under <domain> law; produce a cited risk re
           • finish(summary)         → the agent decides it is done
     │  the playbook is the agent's RUBRIC/knowledge, NOT a hardcoded for-loop over checks
     ▼
-Structured JSON report  ──►  synthesizer  ──►  FastAPI  ──►  React two-pane UI
-                                                              + follow-up chat over the doc
+    Structured JSON report or cited chat answer  ──►  synthesizer  ──►  FastAPI  ──►  React two-pane UI
+                                                                            + legal-chat tab
 ```
 
 ---
@@ -49,7 +49,7 @@ Structured JSON report  ──►  synthesizer  ──►  FastAPI  ──►  R
 
 The product is framed as an **AI paralegal**: a document (or question) comes in, an **orchestrator** decides which bodies of law it implicates, dispatches to the relevant **domain specialists**, and a **synthesizer** merges their findings into one cited memo.
 
-**A "domain specialist" is not a new system** — it is the same audit pipeline (§2) parameterized by `{corpus_index + playbook + prompt_templates}`. Adding a specialist = point it at a different statute set + playbook. This is why multi-agent is an *extension*, not a rewrite. The repo already has `conversation/router.py` (→ intake classifier) and the conversation agent (→ the paralegal you chat with).
+**A "domain specialist" is not a new system** — it is the same audit-and-chat agent (§2) parameterized by `{corpus_index + playbook + prompt_templates}`. Adding a specialist = point it at a different statute set + playbook. This is why multi-agent is an *extension*, not a rewrite. The repo already has `conversation/router.py` (→ intake classifier) and the conversation agent (→ the paralegal you chat with).
 
 ```
 contract / question
@@ -74,7 +74,7 @@ contract / question
 
 ### One class, many instances — and one index per domain
 
-A `DomainAgent` is not bespoke per domain; it is the same **agent** (an LLM in a tool-use loop) parameterized by an index + a playbook. "Different corpus per agent" is literally just a different `index_path`; the agent's *reasoning* is shared, its *data and rubric* differ.
+A `DomainAgent` is not bespoke per domain; it is the same **agent** (an LLM in a tool-use loop) parameterized by an index + a playbook. Each specialist has two capabilities: it audits a contract and it acts as a domain-bounded legal chatbot. "Different corpus per agent" is literally just a different `index_path`; the agent's *reasoning* is shared, its *data and rubric* differ.
 
 ```python
 class DomainAgent:
@@ -87,6 +87,10 @@ class DomainAgent:
     def run(self, contract):                          # LLM-in-a-loop: autonomous, not scripted
         goal = f"Audit this contract under {self.name} law; flag risks, each with a cited article."
         return agent_loop(goal, contract, self.rubric, self.tools, max_steps=N)
+
+    def answer(self, question, contract=None):        # Same agent and tools; legal-chat mode
+        goal = f"Answer this question under {self.name} law with cited articles."
+        return agent_loop(goal, contract, self.rubric, self.tools, question=question, max_steps=N)
 
 class StubAgent:
     def __init__(self, name): self.name = name
@@ -104,6 +108,7 @@ REGISTRY = {
 ### Agent, not workflow (the required properties)
 
 - **Goal** — each specialist is handed an objective ("audit under Civil Code, produce a cited report"), not a script.
+- **Legal-chat capability** — the same specialist can receive the objective "answer this legal question under Civil Code with cited articles." It independently decides what to retrieve and whether the submitted contract is relevant. It must ground claims in its domain corpus, cite the article used, and state uncertainty rather than inventing an answer.
 - **Autonomy** — *it* decides which clauses to probe, what to search for, whether to pull a cross-referenced article, and when it has enough to stop. Control flow emerges from the model, not from Python branching over 15 checks.
 - **Tool calls** — it acts only through tools: `search_statutes`, `get_article`, `flag_risk`, `finish`.
 - **Not a workflow** — the playbook is **knowledge the agent reasons with**, not a hardcoded loop. (The workflow version — `for check in playbook: retrieve(); classify()` — is exactly what we are *not* building.)
@@ -368,7 +373,7 @@ Ships as **`playbook_egypt_civil.yaml`** — 15 checks across capacity, consent,
 
 - `POST /audit` — body `{contract, mode?: "auto"|"manual", agents?: [domain]}`. In `auto` (default) the orchestrator classifies domains; in `manual` it uses the `agents` the user picked. Returns `{routing: {mode, selected, stubbed}, flags_by_domain: {domain: [{check_id, label, severity, action, evidence_span, article_ref, article_ar, article_en, rationale, confidence}]}}`. (v1: only Civil returns flags; stubs return "recognized, not yet available.")
 - `GET /agents` — list registry entries `[{domain, label, live}]` so the UI can render the specialist picker.
-- `POST /chat` — `{doc_id, question}` → paralegal (conversation agent) answer grounded in the doc + retrieved articles, with citations.
+- `POST /chat` — `{question, doc_id?: string, mode?: "auto"|"manual", agents?: [domain]}` → routes the question to domain specialist(s) and returns a cited legal-chat answer. If `doc_id` is supplied, the answer is additionally grounded in that contract; if it is omitted, the answer is grounded only in the selected specialists' statute corpora. It returns uncertainty when the available sources do not support a conclusion.
 
 ---
 
@@ -379,7 +384,7 @@ Ships as **`playbook_egypt_civil.yaml`** — 15 checks across capacity, consent,
 - **Top of the right panel:** a **specialist picker** like a model dropdown — `Auto (detect)` by default, plus explicit choices (Civil · Labour · …) from `GET /agents`. In Auto, show the detected domains as editable chips; manual selection sends `mode:"manual", agents:[…]`.
 - **Right, tabbed:**
   - **Flags** — grouped by specialist ("Civil Code — 3 flags", "Labour — 1 flag"), with a "consulted: Civil, Labour" routing line. Each flag shows severity + cited article (AR/EN); clicking it highlights the offending clause on the left and shows the article text.
-  - **Chat** — ask the paralegal; follow-up Q&A over the document (calls `/chat`).
+  - **Chat** — ask the paralegal a follow-up question about the document or a broader domain-law question. Answers show the supporting contract quote when applicable and cited statute articles (calls `/chat`).
 - Wire to the chosen model via OpenRouter (default `anthropic/claude-sonnet-5`), swappable.
 
 ---
@@ -401,7 +406,7 @@ Ships as **`playbook_egypt_civil.yaml`** — 15 checks across capacity, consent,
 
 - Upload a contract in the browser → receive ≥3 flags, each with a **real quote** from the contract and a **correct article citation** (AR+EN).
 - **Zero hallucinated citations** — evidence-span validation passes on every flag.
-- The Chat tab answers a follow-up question about the document with a citation.
+- The Chat tab answers a follow-up document question or a domain-law question with a citation, and identifies when the answer is unsupported or uncertain.
 - Runs end-to-end in the browser; deploy/host target decided (see DECISIONS.md).
 - A small hand-checked ground-truth set (~10 contract → expected-flags pairs) exists so accuracy can be stated honestly in Q&A.
 
