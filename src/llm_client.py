@@ -88,7 +88,7 @@ def _build_client() -> OpenAI:
         base_url=settings.base_url,
         default_headers={
             "HTTP-Referer": "https://github.com/Malek74/Ross.AI",
-            "X-Title": "Ross.AI — Egyptian Contract Auditor",
+            "X-Title": "Ross.AI - Egyptian Contract Auditor",
         },
     )
 
@@ -173,18 +173,6 @@ def embed(
 
     Automatically batches if len(texts) > batch_size.
     Empty strings are replaced with a single space to avoid API errors.
-
-    Parameters
-    ----------
-    texts : list[str]
-        Texts to embed (will be normalized before calling if you pass raw Arabic).
-        Caller is responsible for pre-normalization.
-    model : override the default EMBEDDING_MODEL
-
-    Returns
-    -------
-    list[list[float]]
-        One embedding vector per input text, in the same order.
     """
     client = get_client()
     emb_model = model or settings.embedding_model
@@ -194,7 +182,6 @@ def embed(
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]
         resp = client.embeddings.create(model=emb_model, input=batch)
-        # Sort by index to guarantee order (OpenRouter may reorder)
         ordered = sorted(resp.data, key=lambda x: x.index)
         all_vectors.extend(item.embedding for item in ordered)
 

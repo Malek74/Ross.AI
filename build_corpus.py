@@ -37,6 +37,7 @@ from src.corpus_loader import (
     load_corpus,
 )
 from src.embeddings import build_index, DomainIndex
+from src.graphrag.builder import build_cross_reference_graph
 
 logging.basicConfig(
     level=logging.INFO,
@@ -131,7 +132,20 @@ def build_domain(domain: str, *, force_rebuild: bool = False) -> None:
     t1 = time.time()
     logger.info("Corpus ready in %.1fs", t1 - t0)
 
-    # ── Step 2: build FAISS index ─────────────────────────────────────────────
+    # ── Step 2: build cross-reference graph ─────────────────────────────────────
+    graph_path = INDEX_ROOT / domain / "graph.json"
+    if graph_path.exists() and not force_rebuild:
+        logger.info("Graph already exists at %s — skipping.", graph_path)
+    else:
+        logger.info("Building cross-reference graph for domain '%s' …", domain)
+        graph = build_cross_reference_graph(domain, articles)
+        logger.info(
+            "  Graph: %d nodes, %d edges",
+            graph["stats"]["node_count"],
+            graph["stats"]["edge_count"],
+        )
+
+    # ── Step 3: build FAISS index ─────────────────────────────────────────────
     if index_path.exists() and not force_rebuild:
         logger.info("Index already exists at %s — skipping build.", index_path)
         logger.info("  (Pass --force to rebuild.)")

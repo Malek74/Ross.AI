@@ -7,6 +7,7 @@ from typing import Any
 
 from src.embeddings import DomainIndex
 from src.evidence_validation import validate_quote, validate_article_ref
+from src.graphrag.retriever import GraphExpandedRetriever
 
 
 @dataclass
@@ -17,6 +18,10 @@ class DomainTools:
     contract: str = ""
     flags: list[dict[str, Any]] = field(default_factory=list)
     finished_summary: str | None = None
+    _retriever: GraphExpandedRetriever | None = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._retriever = GraphExpandedRetriever(self.index)
 
     def definitions(self) -> list[dict[str, Any]]:
         """OpenAI-compatible function schemas; the model may only use these actions."""
@@ -80,7 +85,7 @@ class DomainTools:
         ]
 
     def search_statutes(self, query: str, top_k: int = 5) -> dict[str, Any]:
-        results = self.index.search(query, top_k=min(max(top_k, 1), 10))
+        results = self._retriever.search(query, top_k=min(max(top_k, 1), 10))
         return {"results": [self._public_article(article) for article in results]}
 
     def get_article(self, number: str) -> dict[str, Any]:
@@ -122,7 +127,10 @@ class DomainTools:
 
     @staticmethod
     def _public_article(article: dict[str, Any]) -> dict[str, Any]:
-        return {
+        result = {
             "number": str(article["number"]), "text_ar": article.get("raw_ar", article.get("text_ar", "")),
             "text_en": article.get("text_en", ""), "score": article.get("score"),
         }
+        if article.get("retrieval_source"):
+            result["retrieval_source"] = article["retrieval_source"]
+        return result
