@@ -35,14 +35,6 @@ class Settings:
     )
     base_url: str = "https://openrouter.ai/api/v1"
 
-    # Gemini Alternative
-    gemini_api_key: str = field(
-        default_factory=lambda: os.environ.get("GEMINI_API_KEY", "")
-    )
-    embedding_provider: str = field(
-        default_factory=lambda: os.environ.get("EMBEDDING_PROVIDER", "openrouter")
-    )
-
     # Models
     llm_model: str = field(
         default_factory=lambda: os.environ.get(
@@ -102,7 +94,6 @@ def _build_client() -> OpenAI:
 
 
 _client: OpenAI | None = None
-_gemini_client: OpenAI | None = None
 
 
 def get_client() -> OpenAI:
@@ -110,21 +101,6 @@ def get_client() -> OpenAI:
     if _client is None:
         _client = _build_client()
     return _client
-
-
-def get_gemini_client() -> OpenAI:
-    global _gemini_client
-    if _gemini_client is None:
-        if not settings.gemini_api_key:
-            raise EnvironmentError(
-                "GEMINI_API_KEY is not set. "
-                "Add it to your .env file to use Gemini for embeddings."
-            )
-        _gemini_client = OpenAI(
-            api_key=settings.gemini_api_key,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-        )
-    return _gemini_client
 
 
 # ── Chat completions ──────────────────────────────────────────────────────────
@@ -203,19 +179,29 @@ def embed(
     list[list[float]]
         One embedding vector per input text, in the same order.
     """
-    if settings.embedding_provider == "gemini":
-        client = get_gemini_client()
-    else:
-        client = get_client()
+    client = get_client()
 
     emb_model = model or settings.embedding_model
     texts = [t if t.strip() else " " for t in texts]
 
     all_vectors: list[list[float]] = []
+    import time
+    from openai import RateLimitError, APIConnectionError
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]
-        resp = client.embeddings.create(model=emb_model, input=batch)
-        ordered = sorted(resp.data, key=lambda x: x.index)
+        while True:
+            try:
+                resp = client.embeddings.create(model=emb_model, input=batch)
+                break
+            except RateLimitError as e:
+                print(f"Rate limit hit! Sleeping for 60 seconds... ({e})")
+                time.sleep(60)
+            except APIConnectionError as e:
+                print(f"Connection error! Retrying in 10 seconds... ({e})")
+                time.sleep(10)
+        
+        # Sort by index to guarantee order (OpenRouter may reorder).
+        ordered = sorted(resp.data, key=lambda x: x.index if x.index is not None else 0)
         all_vectors.extend(item.embedding for item in ordered)
 
     return all_vectors

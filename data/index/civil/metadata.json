@@ -1,0 +1,8 @@
+{
+  "domain": "civil",
+  "model": "qwen/qwen3-embedding-8b",
+  "dim": 4096,
+  "count": 1097,
+  "built_at": "2026-07-17T17:18:17.756638+00:00",
+  "source": "TawasulAI/egyptian-law-articles"
+}
