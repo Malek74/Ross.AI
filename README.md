@@ -23,8 +23,6 @@ egyptian-contract-auditor/
 │   ├── playbook_loader.py          # keep
 │   ├── playbook_mapper.py          # keep (label bridge)
 │   ├── prompt_templates.py         # rewrite prompts (comply/violate/silent)
-│   ├── runtrace_writer.py          # keep
-│   ├── runtrace_utils.py           # keep
 │   ├── conversation/               # Chat tab; retrieval routing WITHIN an agent
 │   │   ├── conversation_agent.py
 │   │   ├── query_reformulator.py

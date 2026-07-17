@@ -26,6 +26,7 @@
 | 15 | **One FAISS index per domain** (`data/index/<domain>/`), not a shared store with a metadata filter | Better retrieval (no cross-domain competition for top-k); rebuild one small index when a law changes; maps 1:1 to the agent boundary. Same `DomainAgent` class, different `index_path`. |
 | 16 | **One embedding model system-wide** — every index built and queried with the same model | Vectors across indexes must be comparable; mixing models within an index is a silent bug. B1's A/B just selects which single model that is. |
 | 17 | **Routing = auto classifier (default) + manual override** | Orchestrator auto-detects domains via a cheap classifier, but the user can pick a specialist directly (like choosing a model). Domain routing (`classifier.py`) is separate from retrieval routing (`conversation/router.py`). |
+| 18 | **Specialists + orchestrator are true agents** — goal + tool calls + autonomous loop, NOT a fixed pipeline | The hackathon is judged on agency; a scripted `for check in playbook` loop would fail Q&A. Agent chooses its own tool-call path; bounded by a `max_steps` budget and a `flag_risk`→`validate_quote` integrity gate. Playbook is the rubric, not the control flow. |
 
 ---
 

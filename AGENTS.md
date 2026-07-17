@@ -176,6 +176,19 @@ def route(text, mode="auto", agents=None, k=2, threshold=0.5):
 
 ---
 
+## 2.3 What makes these agents (not a workflow)
+
+Explicit checklist — every specialist and the paralegal orchestrator must satisfy all four. If any turns into a hardcoded sequence, it has regressed to a workflow and must be fixed.
+
+- **Goal (not steps):** the agent is given an objective — *"audit this contract under {domain} law and produce a cited risk report"* — and pursues it. It is **not** handed a fixed `for check in playbook` loop. The playbook is the agent's **rubric/knowledge**, so it can also surface issues the playbook never listed.
+- **Tool calls:** the agent acts only through tools it chooses to invoke — `search_statutes`, `get_article`, `flag_risk` (validated), `finish` for a specialist; `classify`, `consult_specialist`, `synthesize`, `finish` for the orchestrator. No tool call, no effect.
+- **Autonomy:** the LLM drives the loop (`reason → pick tool → observe → decide next`). It decides which clauses to probe, when to pull an article to follow a cross-reference, whether a hit needs deeper search, and when it is done. Control flow is emergent per document.
+- **Not a workflow:** there is no fixed step order. Two different contracts produce two different tool-call traces. The orchestrator consulting specialists is genuine agent-calls-agent, not a pipeline stage.
+
+**Bounded, not unbounded** (reconciles the earlier "keep it bounded" note): autonomy is over *investigation*; determinism is over *integrity*. Two hard rails — a **max tool-call budget** per agent (terminates on stage) and **`flag_risk` enforcing `validate_quote` + article existence** (the model can explore freely but cannot emit a hallucinated citation). Show the tool-call trace in the demo — it's the proof of agency judges will look for.
+
+---
+
 ## 3. Tech stack
 
 - **Backend:** Python, FastAPI, LangChain (already used in source repo).
