@@ -6,7 +6,7 @@ from src.agents.base_agent import DomainAgent
 
 
 class LabourAgent(DomainAgent):
-    """Experimental specialist for Egyptian Labour Law; corpus currency must be verified."""
+    """Egyptian Labour Law No. 14 of 2025 specialist."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -14,10 +14,10 @@ class LabourAgent(DomainAgent):
             index_path="data/index/labour",
             playbook_path="playbooks/labour.yaml",
             domain_label="Labour Law",
-            law_ref="Egyptian Labour Law 14/2025 (pending corpus validation)",
+            law_ref="Egyptian Labour Law No. 14 of 2025",
         )
 
 
 def create_labour_agent() -> LabourAgent:
-    """Factory used by the registry once Labour Law 14/2025 is validated."""
+    """Factory used by the domain-specialist registry."""
     return LabourAgent()

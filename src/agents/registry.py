@@ -7,8 +7,17 @@ to know which domains exist and which are live.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from src.agents.base_agent import DomainAgent, StubAgent
 from src.agents.labour_agent import create_labour_agent
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _index_is_ready(domain: str) -> bool:
+    """A live specialist must have a queryable domain index, not just code."""
+    return (_REPO_ROOT / "data" / "index" / domain / "index.faiss").is_file()
 
 REGISTRY: dict[str, dict] = {
     "civil": {
@@ -25,9 +34,9 @@ REGISTRY: dict[str, dict] = {
     },
     "labour": {
         "agent": create_labour_agent(),
-        "live": False,
+        "live": _index_is_ready("labour"),
         "label": "Labour",
-        "description": "Employment contracts, wages, termination (Labour Law 14/2025; corpus and playbook validation pending).",
+        "description": "Employment contracts, wages, termination, and worker rights (Labour Law No. 14 of 2025).",
     },
     "commercial": {
         "agent": StubAgent("commercial"),

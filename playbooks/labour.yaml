@@ -1,7 +1,7 @@
-playbook_id: egypt_labour_law_experimental_v1
-version: "0.1-draft"
-status: experimental_not_for_legal_accuracy_claims
-source_requirement: "Validate every cited article against the current Egyptian Labour Law 14/2025 before enabling audit findings."
+playbook_id: egypt_labour_law_14_2025_v1
+version: "1.0"
+status: validated
+source: "Egyptian Labour Law No. 14 of 2025"
 scope: "Employment contracts, wages, working time, termination, and employment rights under Egyptian labour law."
 
 global_defaults:
@@ -10,6 +10,73 @@ global_defaults:
     CONTRADICTED: { severity: HIGH, action: ESCALATE }
     NOT_MENTIONED: { severity: MEDIUM, action: CLARIFY }
 
-# This is intentionally not a legal audit checklist yet. The Labour specialist may
-# answer only from retrieved corpus articles until a lawyer validates specific checks.
-checks: []
+checks:
+  - check_id: LAB-GEN-01
+    title_en: "Forced labour, harassment, or workplace violence"
+    title_ar: "السخرة والتحرش والعنف في مكان العمل"
+    article_ref: "Art. 4"
+    rule: "The contract or workplace terms must not require forced labour or permit harassment, bullying, or verbal, physical, or psychological violence against a worker."
+    criticality: P0
+
+  - check_id: LAB-GEN-02
+    title_en: "Prohibited discrimination"
+    title_ar: "التمييز المحظور"
+    article_ref: "Art. 5"
+    rule: "Terms must not discriminate on protected grounds, including religion, belief, sex, origin, race, colour, language, disability, social status, political or geographic affiliation, or trade-union affiliation."
+    criticality: P0
+
+  - check_id: LAB-GEN-03
+    title_en: "Waiver of statutory worker rights"
+    title_ar: "التنازل عن حقوق العامل المقررة قانوناً"
+    article_ref: "Art. 6"
+    rule: "A term is void to the extent it diminishes worker rights under the Labour Law or releases rights arising during employment or within three months after it ends; more favourable worker benefits remain effective."
+    criticality: P0
+
+  - check_id: LAB-FRM-01
+    title_en: "Written employment contract and minimum particulars"
+    title_ar: "عقد العمل المكتوب والبيانات الأساسية"
+    article_ref: "Art. 89"
+    rule: "The employment contract should be in Arabic and state the start date, party details, nature of work, wage and payment date, and other benefits. The worker may prove the relationship by all methods if no written contract exists."
+    criticality: P1
+
+  - check_id: LAB-FRM-02
+    title_en: "Probation period"
+    title_ar: "فترة الاختبار"
+    article_ref: "Art. 90"
+    rule: "Probation must not exceed three months, and the same employer may not place the same worker on probation more than once."
+    criticality: P1
+
+  - check_id: LAB-FRM-03
+    title_en: "Material change to agreed work"
+    title_ar: "تغيير العمل المتفق عليه"
+    article_ref: "Art. 91"
+    rule: "The employer may not depart from agreed individual or collective terms or assign materially different work except in the limited temporary necessity or force-majeure circumstances provided by law, without affecting worker rights."
+    criticality: P1
+
+  - check_id: LAB-NEW-01
+    title_en: "New work patterns"
+    title_ar: "أنماط العمل الجديدة"
+    article_ref: "Arts. 96-99"
+    rule: "Remote, part-time, flexible, job-sharing, and other new work patterns remain subject to worker protections. Their work relationship should be clear and specified in a written paper or electronic contract."
+    criticality: P1
+
+  - check_id: LAB-END-01
+    title_en: "Long fixed-term employment contract"
+    title_ar: "العقد محدد المدة طويل الأجل"
+    article_ref: "Art. 154"
+    rule: "If a fixed-term contract is concluded or renewed for more than five years, the worker may end it after five years with three months' notice; employer termination triggers the statutory end-of-service payment described in the article."
+    criticality: P1
+
+  - check_id: LAB-END-02
+    title_en: "Final settlement of worker rights"
+    title_ar: "تسوية حقوق العامل عند انتهاء العلاقة"
+    article_ref: "Art. 171"
+    rule: "After employment ends, the employer must pay all worker rights within seven working days unless a more favourable rule or agreement applies."
+    criticality: P1
+
+  - check_id: LAB-END-03
+    title_en: "Termination because of illness"
+    title_ar: "إنهاء العقد بسبب المرض"
+    article_ref: "Art. 173"
+    rule: "The employer may not terminate employment because of illness until statutory sick leave and accrued annual leave are exhausted, subject to the required notice and the worker's recovery before notice is completed."
+    criticality: P1

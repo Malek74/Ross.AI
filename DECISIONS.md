@@ -27,6 +27,8 @@
 | 16 | **One embedding model system-wide** — every index built and queried with the same model | Vectors across indexes must be comparable; mixing models within an index is a silent bug. B1's A/B just selects which single model that is. |
 | 17 | **Routing = auto classifier (default) + manual override** | Orchestrator auto-detects domains via a cheap classifier, but the user can pick a specialist directly (like choosing a model). Domain routing (`classifier.py`) is separate from retrieval routing (`conversation/router.py`). |
 | 18 | **Specialists + orchestrator are true agents** — goal + tool calls + autonomous loop, NOT a fixed pipeline | The hackathon is judged on agency; a scripted `for check in playbook` loop would fail Q&A. Agent chooses its own tool-call path; bounded by a `max_steps` budget and a `flag_risk`→`validate_quote` integrity gate. Playbook is the rubric, not the control flow. |
+| 19 | **Labour bootstrap = `dataflare/egypt-legal-corpus` + official Law 14/2025 verification** | Filter the Arabic document-level corpus by `law_name`, clean and split it into article chunks, then compare its text/article coverage against the Ministry of Labour's official Law 14/2025. The official text remains the citation authority; the dataset is a retrieval bootstrap, not proof of currency. |
+| 20 | **Labour examples/evaluation = `tarekys5/egyptian_legal_v2`** | Use its Labour-law, IRAC-structured examples for routing tests, retrieval questions, agent traces, and chat evaluation. Do not index its generated answers as statutory authority or cite them to users. |
 
 ---
 
@@ -76,6 +78,11 @@ No longer a lock-in. Set a default, keep the shortlist, A/B them during M0–M1 
 ### B6. Task split between teammates
 - Proposed: A = retrieval + audit + API; B = UI + demo contracts + eval + video. **Confirm.**
 
+### B7. Labour corpus assembly
+- **Bootstrap:** load `dataflare/egypt-legal-corpus`, filter `law_name` for `قانون العمل`, and article-chunk/clean the result into `data/corpus/labour/articles.jsonl`.
+- **Authority check:** compare the resulting article numbers and Arabic text with the [Ministry of Labour's official Law 14/2025 PDF](https://www.labour.gov.eg/media/0iedik3q/%D8%A7%D9%84%D9%82%D8%A7%D9%86%D9%88%D9%86-%D8%B1%D9%82%D9%85-14-%D9%84%D8%B3%D9%86%D8%A9-2025-%D8%A8%D8%A5%D8%B5%D8%AF%D8%A7%D8%B1-%D9%82%D8%A7%D9%86%D9%88%D9%86-%D8%A7%D9%84%D8%B9%D9%85%D9%84.pdf) before building the live FAISS index. Replace or supplement stale/missing dataset text from the official source.
+- **Evaluation:** use `tarekys5/egyptian_legal_v2` as an IRAC-style question set. Keep it outside the statute index and check its licence before redistributing examples.
+
 ---
 
 ## Part C — Risks & caveats
@@ -93,4 +100,5 @@ No longer a lock-in. Set a default, keep the shortlist, A/B them during M0–M1 
 ## Part D — Attribution / licensing
 
 - `TawasulAI/egyptian-law-articles`, `dataflare/egypt-legal-corpus` (MIT), `fr3on/eg-legal-instruction-following` (Apache-2.0) — attribute in the repo. Original legal texts are public domain.
+- `tarekys5/egyptian_legal_v2` — use for evaluation only; confirm its dataset licence before redistribution or inclusion in a released demo bundle.
 - We fork our own prior repo (`Exhibit-A-I`); the value-add is the Arabic adaptation, statute corpus, domain shift, and citation grounding.
