@@ -28,7 +28,7 @@ REGISTRY: dict[str, dict] = {
             domain_label="Civil Code",
             law_ref="Egyptian Civil Code (Law 131/1948)",
         ),
-        "live": True,
+        "live": _index_is_ready("civil"),
         "label": "Civil Code",
         "description": "Contracts, obligations, capacity, consent, property, civil liability.",
     },
