@@ -1,0 +1,23 @@
+# ── Core API + inference ──────────────────────────────────────────────────────
+openai>=1.30.0          # OpenRouter-compatible (LLM + embeddings — one key)
+python-dotenv>=1.0.0    # .env loading
+
+# ── Retrieval ─────────────────────────────────────────────────────────────────
+faiss-cpu>=1.7.4        # per-domain FAISS indexes
+numpy>=1.26.0           # FAISS + embeddings matrix ops
+
+# ── Datasets / corpus ─────────────────────────────────────────────────────────
+datasets>=2.20.0        # HuggingFace: TawasulAI + dataflare loaders
+tqdm>=4.66.0            # progress bars during index build
+
+# ── Document ingestion ────────────────────────────────────────────────────────
+pymupdf>=1.24.0         # PDF → text (alias: fitz)
+python-docx>=1.1.0      # DOCX → text
+
+# ── API ───────────────────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9  # file uploads
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+pyyaml>=6.0.1           # playbook YAML loading
