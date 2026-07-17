@@ -60,15 +60,15 @@ def _stitch_tawasul(rows: list[dict]) -> list[dict]:
         if num not in seen:
             seen[num] = {
                 "number": num,
-                "text_ar": clean_ocr(row.get("text_ar", "")),
-                "text_en": row.get("text_en", ""),
+                "text_ar": clean_ocr(row.get("text_ar") or ""),
+                "text_en": row.get("text_en") or "",
                 "page": row.get("page"),
             }
             order.append(num)
         else:
             # Append continuation text
-            seen[num]["text_ar"] += " " + clean_ocr(row.get("text_ar", ""))
-            seen[num]["text_en"] += " " + row.get("text_en", "")
+            seen[num]["text_ar"] += " " + clean_ocr(row.get("text_ar") or "")
+            seen[num]["text_en"] += " " + (row.get("text_en") or "")
 
     return [seen[n] for n in order]
 
@@ -87,11 +87,19 @@ def load_tawasul(domain: str = "civil") -> list[Article]:
     -------
     list[Article]
     """
-    from datasets import load_dataset  # type: ignore
+    import json
+    from huggingface_hub import hf_hub_download
 
     logger.info("Loading TawasulAI/egyptian-law-articles …")
-    ds = load_dataset("TawasulAI/egyptian-law-articles", split="train")
-    raw_rows = [dict(row) for row in ds]
+    path = hf_hub_download(
+        repo_id="TawasulAI/egyptian-law-articles",
+        filename="egyptian_law_articles.json",
+        repo_type="dataset"
+    )
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    raw_rows = data.get("articles", [])
     logger.info("  %d raw rows fetched", len(raw_rows))
 
     stitched = _stitch_tawasul(raw_rows)
