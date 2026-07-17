@@ -231,7 +231,9 @@ def load_dataflare(domain: str) -> list[Article]:
 
     keywords = _DOMAIN_FILTER[domain]
     filtered = [
-        row for row in ds if any(kw in (row.get("law_name") or "") for kw in keywords)
+        row for row in ds 
+        if any(kw in (row.get("law_name") or "") for kw in keywords)
+        and "السعودي" not in (row.get("law_name") or "")
     ]
     logger.info(
         "  %d/%d rows matched domain '%s'", len(filtered), len(ds), domain
@@ -270,12 +272,20 @@ def load_official_labour_pdf(pdf_path: Path) -> list[Article]:
     Used to supplement or correct the dataflare corpus to ensure currency.
     """
     import fitz  # pymupdf
-    logger.info("Extracting official Labour Law 14/2025 from %s", pdf_path)
+    import urllib.request
     
     if not pdf_path.exists():
-        logger.warning("Official Labour PDF not found at %s. Skipping.", pdf_path)
-        return []
+        logger.info("Official Labour PDF not found. Downloading...")
+        url = "https://www.labour.gov.eg/media/0iedik3q/%D8%A7%D9%84%D9%82%D8%A7%D9%86%D9%88%D9%86-%D8%B1%D9%82%D9%85-14-%D9%84%D8%B3%D9%86%D8%A9-2025-%D8%A8%D8%A5%D8%B5%D8%AF%D8%A7%D8%B1-%D9%82%D8%A7%D9%86%D9%88%D9%86-%D8%A7%D9%84%D8%B9%D9%85%D9%84.pdf"
+        try:
+            pdf_path.parent.mkdir(parents=True, exist_ok=True)
+            urllib.request.urlretrieve(url, pdf_path)
+            logger.info("Downloaded official Labour Law 14/2025 PDF to %s", pdf_path)
+        except Exception as e:
+            logger.warning("Failed to download official Labour PDF: %s. Skipping.", e)
+            return []
 
+    logger.info("Extracting official Labour Law 14/2025 from %s", pdf_path)
     doc = fitz.open(pdf_path)
     full_text = []
     for page in doc:
@@ -319,6 +329,46 @@ def load_eval_dataset(repo_id: str = "tarekys5/egyptian_legal_v2") -> list[dict]
     eval_data = [row for row in ds]
     logger.info("  Loaded %d evaluation records.", len(eval_data))
     return eval_data
+
+
+def load_tarekys5_as_articles(domain: str) -> list[Article]:
+    """
+    Extract the tarekys5 Q&A dataset and format it as Articles to be embedded
+    in the FAISS index, as requested by the user.
+    """
+    from datasets import load_dataset  # type: ignore
+    logger.info("Loading tarekys5/egyptian_legal_v2 to embed for domain '%s' ...", domain)
+    ds = load_dataset("tarekys5/egyptian_legal_v2", split="train")
+    
+    keywords = _DOMAIN_FILTER.get(domain, [])
+    
+    articles: list[Article] = []
+    for i, row in enumerate(ds):
+        # We should filter to only include rows relevant to the domain to avoid contamination
+        text = f"{row.get('instruction', '')} {row.get('input', '')} {row.get('output', '')} {row.get('legal_basis', '')}"
+        
+        if not any(kw in text for kw in keywords):
+            continue
+            
+        formatted_text = (
+            f"سؤال: {row.get('instruction', '')}\n"
+            f"التفاصيل: {row.get('input', '')}\n"
+            f"الإجابة: {row.get('output', '')}\n"
+            f"السند القانوني: {row.get('legal_basis', '')}"
+        )
+        
+        articles.append({
+            "id": f"tarekys5-qa-{i}",
+            "number": str(row.get("article") or f"qa-{i}"),
+            "domain": domain,
+            "text_ar": normalize_document(formatted_text),
+            "text_en": "",
+            "raw_ar": formatted_text,
+            "source": "tarekys5/egyptian_legal_v2"
+        })
+        
+    logger.info("  Filtered and formatted %d Q&A records for domain '%s'.", len(articles), domain)
+    return articles
 
 
 # ── Persistence ───────────────────────────────────────────────────────────────
@@ -370,6 +420,18 @@ def _cli() -> None:
 
     if args.domain == "civil":
         articles = load_tawasul(domain="civil")
+    elif args.domain == "labour":
+        articles = load_dataflare(domain="labour")
+        pdf_path = Path("data/law_14_2025.pdf")
+        official_articles = load_official_labour_pdf(pdf_path)
+        articles.extend(official_articles)
+        
+        tarekys_articles = load_tarekys5_as_articles(domain="labour")
+        articles.extend(tarekys_articles)
+    elif args.domain == "commercial":
+        articles = load_dataflare(domain="commercial")
+        tarekys_articles = load_tarekys5_as_articles(domain="commercial")
+        articles.extend(tarekys_articles)
     else:
         articles = load_dataflare(domain=args.domain)
 

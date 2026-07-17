@@ -2,7 +2,7 @@
   "domain": "commercial",
   "model": "qwen/qwen3-embedding-8b",
   "dim": 4096,
-  "count": 154,
-  "built_at": "2026-07-17T17:31:06.763217+00:00",
+  "count": 180,
+  "built_at": "2026-07-17T18:53:00.684139+00:00",
   "source": "dataflare/egypt-legal-corpus"
 }

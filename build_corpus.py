@@ -123,8 +123,21 @@ def build_domain(domain: str, *, force_rebuild: bool = False) -> None:
         logger.info("Downloading corpus for domain '%s' …", domain)
         if domain == "civil":
             articles = load_tawasul(domain="civil")
-        else:
-            articles = load_dataflare(domain=domain)
+        elif domain == "labour":
+            articles = load_dataflare(domain="labour")
+            from src.corpus_loader import load_official_labour_pdf, load_tarekys5_as_articles
+            
+            pdf_path = Path("data/law_14_2025.pdf")
+            official_articles = load_official_labour_pdf(pdf_path)
+            articles.extend(official_articles)
+            
+            tarekys_articles = load_tarekys5_as_articles(domain="labour")
+            articles.extend(tarekys_articles)
+        elif domain == "commercial":
+            articles = load_dataflare(domain="commercial")
+            from src.corpus_loader import load_tarekys5_as_articles
+            tarekys_articles = load_tarekys5_as_articles(domain="commercial")
+            articles.extend(tarekys_articles)
 
         save_corpus(articles, corpus_path)
         logger.info("  Saved %d articles → %s", len(articles), corpus_path)

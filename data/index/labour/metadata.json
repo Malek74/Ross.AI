@@ -2,7 +2,7 @@
   "domain": "labour",
   "model": "qwen/qwen3-embedding-8b",
   "dim": 4096,
-  "count": 374,
-  "built_at": "2026-07-17T17:39:20.862697+00:00",
+  "count": 670,
+  "built_at": "2026-07-17T18:48:52.707692+00:00",
   "source": "dataflare/egypt-legal-corpus"
 }
