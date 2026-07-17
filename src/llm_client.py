@@ -88,7 +88,7 @@ def _build_client() -> OpenAI:
         base_url=settings.base_url,
         default_headers={
             "HTTP-Referer": "https://github.com/Malek74/Ross.AI",
-            "X-Title": "Ross.AI — Egyptian Contract Auditor",
+            "X-Title": "Ross.AI - Egyptian Contract Auditor",
         },
     )
 
