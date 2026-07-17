@@ -43,7 +43,7 @@ class Settings:
     )
     classifier_model: str = field(
         default_factory=lambda: os.environ.get(
-            "CLASSIFIER_MODEL", "google/gemini-flash-1.5"
+            "CLASSIFIER_MODEL", "google/gemini-2.5-flash"
         )
     )
     embedding_model: str = field(

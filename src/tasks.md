@@ -1,0 +1,4 @@
+- review orchestrator & synthesiser if they match all that we want to do
+- check connversational agent of law and where should it get data from whether a vector DB containing all indexes or based on input decide which ones to use 
+- check orchestrator & synthesiser and their prompts
+- for a input pdf contract shouldn't the pdf text be passed to all agents?

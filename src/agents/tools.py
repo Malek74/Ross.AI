@@ -17,15 +17,17 @@ class DomainTools:
     index: DomainIndex
     contract: str = ""
     flags: list[dict[str, Any]] = field(default_factory=list)
+    revisions: list[dict[str, Any]] = field(default_factory=list)
+    drafts: list[dict[str, Any]] = field(default_factory=list)
     finished_summary: str | None = None
     _retriever: GraphExpandedRetriever | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._retriever = GraphExpandedRetriever(self.index)
 
-    def definitions(self) -> list[dict[str, Any]]:
+    def definitions(self, *, mode: str = "audit") -> list[dict[str, Any]]:
         """OpenAI-compatible function schemas; the model may only use these actions."""
-        return [
+        core = [
             {
                 "type": "function",
                 "function": {
@@ -72,6 +74,57 @@ class DomainTools:
             {
                 "type": "function",
                 "function": {
+                    "name": "revise_clause",
+                    "description": "Rewrite a flagged contract clause to comply with the cited article. Preserve the original intent. Use only after flag_risk identified the issue.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "original_clause": {"type": "string", "description": "The exact clause text from the contract to revise."},
+                            "revised_clause": {"type": "string", "description": "The rewritten clause that complies with the law."},
+                            "article_ref": {"type": "string", "description": "Article number that governs the revision."},
+                            "rationale": {"type": "string", "description": "Why this revision makes the clause compliant."},
+                        },
+                        "required": ["original_clause", "revised_clause", "article_ref", "rationale"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "draft_clause",
+                    "description": "Draft a new contract clause grounded in retrieved articles. Use search_statutes first to find the governing articles.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "topic": {"type": "string", "description": "The subject of the clause (e.g. 'termination', 'liability cap')."},
+                            "clause_text": {"type": "string", "description": "The drafted clause text."},
+                            "article_ref": {"type": "string", "description": "Article number(s) grounding this clause."},
+                            "rationale": {"type": "string", "description": "How the clause satisfies the cited articles."},
+                        },
+                        "required": ["topic", "clause_text", "article_ref", "rationale"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "validate_draft",
+                    "description": "Self-audit a drafted or revised clause against the index. Search for articles that could conflict with the clause.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "clause_text": {"type": "string", "description": "The clause to validate."},
+                        },
+                        "required": ["clause_text"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "finish",
                     "description": "Finish the audit or legal-chat answer after gathering sufficient evidence.",
                     "parameters": {
@@ -83,6 +136,7 @@ class DomainTools:
                 },
             },
         ]
+        return core
 
     def search_statutes(self, query: str, top_k: int = 5) -> dict[str, Any]:
         results = self._retriever.search(query, top_k=min(max(top_k, 1), 10))
@@ -111,6 +165,48 @@ class DomainTools:
         }
         self.flags.append(flag)
         return {"accepted": True, "flag": flag}
+
+    def revise_clause(self, original_clause: str, revised_clause: str, article_ref: str, rationale: str) -> dict[str, Any]:
+        if not self.contract:
+            return {"accepted": False, "reason": "No contract was supplied."}
+        match = validate_quote(original_clause, self.contract)
+        if not match.matched:
+            return {"accepted": False, "reason": f"Original clause not found in contract (best similarity: {match.similarity:.2f})."}
+        if not validate_article_ref(article_ref, self.index):
+            return {"accepted": False, "reason": "Article does not exist in this specialist's corpus."}
+        revision = {
+            "original_clause": original_clause,
+            "revised_clause": revised_clause,
+            "article_ref": article_ref,
+            "rationale": rationale,
+            "quote_match": {"start": match.start, "end": match.end, "similarity": match.similarity},
+        }
+        self.revisions.append(revision)
+        return {"accepted": True, "revision": revision}
+
+    def draft_clause(self, topic: str, clause_text: str, article_ref: str, rationale: str) -> dict[str, Any]:
+        if not validate_article_ref(article_ref, self.index):
+            return {"accepted": False, "reason": "Article does not exist in this specialist's corpus."}
+        draft = {
+            "topic": topic,
+            "clause_text": clause_text,
+            "article_ref": article_ref,
+            "rationale": rationale,
+        }
+        self.drafts.append(draft)
+        return {"accepted": True, "draft": draft}
+
+    def validate_draft(self, clause_text: str) -> dict[str, Any]:
+        results = self._retriever.search(clause_text, top_k=5)
+        potential_conflicts = []
+        for article in results:
+            potential_conflicts.append({
+                "number": str(article["number"]),
+                "text_ar": article.get("raw_ar", article.get("text_ar", "")),
+                "text_en": article.get("text_en", ""),
+                "score": article.get("score"),
+            })
+        return {"clause": clause_text, "related_articles": potential_conflicts}
 
     def finish(self, summary: str) -> dict[str, Any]:
         self.finished_summary = summary

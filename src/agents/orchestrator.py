@@ -8,7 +8,9 @@ from typing import Any, Literal
 
 from src.agents.classifier import classify_domains
 from src.agents.registry import REGISTRY
+from src.agents.synthesizer import synthesize_flags
 from src.llm_client import get_client, settings
+from src.prompt_templates import ORCHESTRATOR_SYSTEM, ORCHESTRATOR_USER
 
 TaskMode = Literal["audit", "chat"]
 RouteMode = Literal["auto", "manual"]
@@ -207,36 +209,33 @@ class ParalegalOrchestrator:
         return {"error": f"Unknown tool '{name}'."}
 
     def _build_memo(self, state: OrchestrationState, summary: str) -> dict[str, Any]:
-        flags_by_domain: dict[str, list[dict[str, Any]]] = {}
-        seen: set[tuple[str, str]] = set()
-        for domain, result in state.consultations.items():
-            flags: list[dict[str, Any]] = []
-            for flag in result.get("flags", []):
-                key = (flag.get("evidence_span", ""), flag.get("article_ref", ""))
-                if key not in seen:
-                    seen.add(key)
-                    flags.append(flag)
-            if flags:
-                flags_by_domain[domain] = flags
-        return {"summary": summary, "flags_by_domain": flags_by_domain}
+        return synthesize_flags(state.consultations, fallback_summary=summary)
 
     def _system_prompt(self, mode: RouteMode, task: TaskMode, selected: list[str]) -> str:
+        
         availability = [
             {"domain": domain, "live": entry["live"], "description": entry["description"]}
             for domain, entry in self.registry.items()
         ]
-        manual = f"Manual routing allows only: {selected}." if mode == "manual" else "Auto routing may consult any registered domain."
-        return f"""You are an Egyptian-law paralegal orchestrator.
-GOAL: Produce one grounded, cited memo for the user's {task} request by autonomously choosing whether and which domain specialists to consult.
-{manual}
-Registry: {json.dumps(availability, ensure_ascii=False)}
-Use classify as a routing hint in auto mode when useful. Specialists are the only source of legal findings; do not invent facts, citations, or specialist conclusions. You may consult a second specialist when justified. Synthesize consulted results, state any unavailable specialist, then call finish."""
+        routing_constraint = (
+            f"Manual routing allows only: {selected}."
+            if mode == "manual"
+            else "Auto routing may consult any registered domain."
+        )
+        return ORCHESTRATOR_SYSTEM.format(
+            task=task,
+            routing_constraint=routing_constraint,
+            registry_json=json.dumps(availability, ensure_ascii=False),
+        )
 
     @staticmethod
     def _input_prompt(contract: str, question: str | None, task: TaskMode) -> str:
-        sections = [f"Requested task: {task}."]
+        body_parts: list[str] = []
         if question:
-            sections.append(f"User question:\n{question}")
+            body_parts.append(f"User question:\n{question}")
         if contract:
-            sections.append(f"Contract:\n{contract}")
-        return "\n\n".join(sections)
+            body_parts.append(f"Contract:\n{contract}")
+        return ORCHESTRATOR_USER.format(
+            task=task,
+            body="\n\n".join(body_parts),
+        )

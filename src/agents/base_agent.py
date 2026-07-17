@@ -11,6 +11,17 @@ import yaml
 from src.agents.tools import DomainTools
 from src.embeddings import DomainIndex
 from src.llm_client import get_client, settings
+from src.prompt_templates import (
+    SPECIALIST_SYSTEM_AUDIT,
+    SPECIALIST_SYSTEM_CHAT,
+    SPECIALIST_SYSTEM_REVISE,
+    SPECIALIST_SYSTEM_DRAFT,
+    SPECIALIST_USER_AUDIT,
+    SPECIALIST_USER_CHAT,
+    SPECIALIST_USER_CHAT_WITH_CONTRACT,
+    SPECIALIST_USER_REVISE,
+    SPECIALIST_USER_DRAFT,
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -50,12 +61,40 @@ class DomainAgent:
             mode="chat",
         )
 
-    def _agent_loop(self, *, goal: str, contract: str, question: str | None, mode: Literal["audit", "chat"]) -> dict[str, Any]:
+    def revise(self, contract: str, flag_ids: list[str] | None = None) -> dict[str, Any]:
+        """Revise flagged clauses in a contract to comply with this domain's law."""
+        return self._agent_loop(
+            goal=f"Revise the flagged clauses in this contract to comply with {self.name} law. Preserve the original intent. Use revise_clause for each fix, citing the governing article.",
+            contract=contract,
+            question=None,
+            mode="revise",
+        )
+
+    def draft(self, contract_type: str, requirements: str = "") -> dict[str, Any]:
+        """Draft a new contract grounded in this domain's statute corpus."""
+        prompt = f"Draft a {contract_type} contract compliant with Egyptian {self.name} law."
+        if requirements:
+            prompt += f" Requirements: {requirements}"
+        return self._agent_loop(
+            goal=prompt,
+            contract="",
+            question=prompt,
+            mode="draft",
+        )
+
+    def _agent_loop(
+        self,
+        *,
+        goal: str,
+        contract: str,
+        question: str | None,
+        mode: Literal["audit", "chat", "revise", "draft"],
+    ) -> dict[str, Any]:
         index = self._load_index()
         tools = DomainTools(index=index, contract=contract)
         rubric = self._load_playbook()
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self._system_prompt(goal, rubric, mode)},
+            {"role": "system", "content": self._system_prompt(rubric, mode)},
             {"role": "user", "content": self._input_prompt(contract, question, mode)},
         ]
 
@@ -64,7 +103,7 @@ class DomainAgent:
         trace: list[dict[str, Any]] = []
         for step in range(settings.agent_max_steps):
             response = client.chat.completions.create(
-                model=settings.llm_model, messages=messages, tools=tools.definitions(),
+                model=settings.llm_model, messages=messages, tools=tools.definitions(mode=mode),
                 tool_choice="auto", temperature=0.0, max_tokens=2048, extra_body=settings.extra_body,
             )
             message = response.choices[0].message
@@ -89,11 +128,16 @@ class DomainAgent:
 
         if not final_text:
             final_text = "The agent reached its step limit before producing a supported final answer."
-        return {
+        result: dict[str, Any] = {
             "domain": self.name, "mode": mode, "summary": final_text,
             "flags": tools.flags, "trace": trace,
             "status": "finished" if tools.finished_summary is not None else "step_limit_or_text_response",
         }
+        if tools.revisions:
+            result["revisions"] = tools.revisions
+        if tools.drafts:
+            result["drafts"] = tools.drafts
+        return result
 
     def _load_index(self) -> DomainIndex:
         root = self.index_path if self.index_path.is_absolute() else _ROOT / self.index_path
@@ -104,25 +148,43 @@ class DomainAgent:
         with path.open(encoding="utf-8") as file:
             return yaml.safe_load(file) or {}
 
-    def _system_prompt(self, goal: str, rubric: dict[str, Any], mode: str) -> str:
+    def _system_prompt(self, rubric: dict[str, Any], mode: str) -> str:
         rubric_text = yaml.safe_dump(rubric, allow_unicode=True, sort_keys=False)
-        return f"""You are the {self.domain_label} specialist in a grounded Egyptian-law paralegal.
-LEGAL DOMAIN: {self.law_ref}
-GOAL: {goal}
-MODE: {mode}
-Use tools to retrieve legal authority before making legal claims. You may only cite articles returned by a tool. Do not invent article numbers, contract terms, facts, or quotations. In audit mode, call flag_risk only for a real contract substring. In chat mode, do not create risk flags unless explicitly asked to audit. When evidence is insufficient, say so. Finish by calling finish.
+        templates = {
+            "audit": SPECIALIST_SYSTEM_AUDIT,
+            "chat": SPECIALIST_SYSTEM_CHAT,
+            "revise": SPECIALIST_SYSTEM_REVISE,
+            "draft": SPECIALIST_SYSTEM_DRAFT,
+        }
+        template = templates.get(mode, SPECIALIST_SYSTEM_AUDIT)
+        return template.format(
+            domain_label=self.domain_label,
+            law_ref=self.law_ref,
+            rubric=rubric_text,
+        )
 
-RUBRIC (guidance, not a mandatory workflow):
-{rubric_text}"""
-
-    @staticmethod
-    def _input_prompt(contract: str, question: str | None, mode: str) -> str:
-        parts = [f"Requested mode: {mode}."]
-        if question:
-            parts.append(f"User question:\n{question}")
-        if contract:
-            parts.append(f"Submitted contract:\n{contract}")
-        return "\n\n".join(parts)
+    def _input_prompt(self, contract: str, question: str | None, mode: str) -> str:
+        if mode == "audit":
+            return SPECIALIST_USER_AUDIT.format(
+                contract_text=contract,
+                domain_label=self.domain_label,
+            )
+        if mode == "revise":
+            return SPECIALIST_USER_REVISE.format(
+                contract_text=contract,
+                domain_label=self.domain_label,
+            )
+        if mode == "draft":
+            return SPECIALIST_USER_DRAFT.format(
+                question=question or "",
+                domain_label=self.domain_label,
+            )
+        if question and contract:
+            return SPECIALIST_USER_CHAT_WITH_CONTRACT.format(
+                question=question,
+                contract_text=contract,
+            )
+        return SPECIALIST_USER_CHAT.format(question=question or "")
 
 
 class StubAgent:
