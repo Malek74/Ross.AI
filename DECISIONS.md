@@ -27,6 +27,10 @@
 | 16 | **One embedding model system-wide** — every index built and queried with the same model | Vectors across indexes must be comparable; mixing models within an index is a silent bug. B1's A/B just selects which single model that is. |
 | 17 | **Routing = auto classifier (default) + manual override** | Orchestrator auto-detects domains via a cheap classifier, but the user can pick a specialist directly (like choosing a model). Domain routing (`classifier.py`) is separate from retrieval routing (`conversation/router.py`). |
 | 18 | **Specialists + orchestrator are true agents** — goal + tool calls + autonomous loop, NOT a fixed pipeline | The hackathon is judged on agency; a scripted `for check in playbook` loop would fail Q&A. Agent chooses its own tool-call path; bounded by a `max_steps` budget and a `flag_risk`→`validate_quote` integrity gate. Playbook is the rubric, not the control flow. |
+| 19 | **GraphRAG for index retrieval**, not plain vector-only | Article cross-references are the backbone of legal reasoning (e.g. "subject to Article 120"). Graph edges capture these; vector search finds the entry point, graph traversal follows the cross-reference chain. Gives multi-hop retrieval that plain top-k misses. |
+| 20 | **Commercial agent is LIVE** (2nd specialist) | Lower currency risk than Labour; shares the contract-review shape; corpus confirmed in dataflare. |
+| 21 | **Labour agent is LIVE** (3rd specialist) | Data present in dataflare; high real-world relevance. Currency risk acknowledged (Labour Law 14/2025). |
+| 22 | **Full-cycle paralegal** — audit + chat + revise + draft + PDF export | Four goal types, same agent loop. Each is a goal the agent pursues with tools, not a new pipeline. Revise/draft use `revise_clause`, `draft_clause`, `validate_draft`, `export_pdf` tools. Proves agency: different goals produce different tool traces over the same architecture. |
 
 ---
 
@@ -53,14 +57,11 @@ No longer a lock-in. Set a default, keep the shortlist, A/B them during M0–M1 
 
 **Why frontier over Arabic-specialized brains:** grounded citations (our evidence-span validation) matter more than native Arabic fluency.
 
-### B2. GraphRAG or vector-only?
-- **Vector-only (default):** reliable, fast, demo-ready.
-- **GraphRAG (stretch):** add article cross-reference / repeal edges for multi-hop reasoning. Repo already has scaffolding. Only if M0–M2 finish early.
+### ~~B2. GraphRAG or vector-only?~~ → **DECIDED (#19): GraphRAG**
+- Vector search finds the entry-point articles; a graph layer follows cross-reference edges (e.g. "subject to Article 120") for multi-hop retrieval. Each domain index is a graph: nodes = articles, edges = cross-references extracted during corpus build. The `search_statutes` tool does vector search first, then expands via graph neighbors.
 
-### B2b. Which 2nd specialist to make live (if time allows after M1/M2)?
-- **Labour** — high real-world relevance; data present in dataflare, **but** must use Labour Law **14/2025** (verify the corpus has the current version, not the old 12/2003). Currency risk.
-- **Commercial / Trade** — shares the contract-review shape; likely in dataflare; lower currency risk than labour.
-- **Recommendation:** Commercial if you want the safest demo; Labour if you want the more relatable one. **Do not** pick Finance/Tax as the 2nd live agent — corpus is a data gap and currency risk is highest; keep it the flagship **stub**. (Everything Criminal/Procedure/Personal-status = stub for v1.)
+### ~~B2b. Which 2nd/3rd specialist to make live?~~ → **DECIDED (#20, #21): Commercial + Labour**
+- Both are live. Finance/Tax remain stubs (data gap).
 
 ### B3. What to build first after setup?
 - **Two-pane UI** — visible progress, judge-facing.

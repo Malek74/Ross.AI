@@ -29,10 +29,16 @@ REGISTRY: dict[str, dict] = {
         "description": "Employment contracts, wages, termination (Labour Law 14/2025).",
     },
     "commercial": {
-        "agent": StubAgent("commercial"),
-        "live": False,
+        "agent": DomainAgent(
+            name="commercial",
+            index_path="data/index/commercial",
+            playbook_path="playbooks/commercial.yaml",
+            domain_label="Commercial Code",
+            law_ref="Egyptian Commercial Code (Law 17/1999)",
+        ),
+        "live": True,
         "label": "Commercial",
-        "description": "Commercial companies, trade law, negotiable instruments.",
+        "description": "Commercial contracts, merchant obligations, negotiable instruments, commercial agency, sale of establishments.",
     },
     "criminal": {
         "agent": StubAgent("criminal"),
