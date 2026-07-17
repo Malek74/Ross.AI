@@ -1,0 +1,150 @@
+playbook_id: egypt_civil_contract_validity_v1
+version: "0.1-draft"
+source: "Egyptian Civil Code (Law 131/1948) — article numbers per TawasulAI/egyptian-law-articles"
+
+# ─────────────────────────────────────────────────────────────────
+# ⚠️  READ BEFORE USING
+#   1. This is a HACKATHON v1 draft, NOT legal advice. Every check
+#      must be validated by someone with Egyptian-law knowledge
+#      before you present accuracy claims to judges.
+#   2. Article numbers are taken from the article-level dataset and
+#      verified against the TawasulAI corpus.
+#   3. SCOPE: general contract validity under the Civil Code. This is
+#      STABLE law (1948) — unlike labour/tax, which changed recently
+#      (Labour Law 14/2025).
+#
+#   LABEL BRIDGE (keeps the existing mapper working unchanged):
+#     ENTAILED       ->  contract COMPLIES with the rule
+#     CONTRADICTED   ->  contract VIOLATES the rule
+#     NOT_MENTIONED  ->  contract is SILENT on the rule
+# ─────────────────────────────────────────────────────────────────
+
+global_defaults:
+  evidence_required_for: ["ENTAILED", "CONTRADICTED"]
+  label_to_status:
+    ENTAILED: compliant
+    CONTRADICTED: violation
+    NOT_MENTIONED: not_addressed
+  label_to_default_decision:
+    ENTAILED:      { severity: LOW,    action: ACCEPT }
+    CONTRADICTED:  { severity: HIGH,   action: ESCALATE }
+    NOT_MENTIONED: { severity: MEDIUM, action: CLARIFY }
+
+criticality_tiers:
+  P0: "Goes to whether the contract is void / voidable at all"
+  P1: "Materially affects validity or enforceability"
+  P2: "Good-practice / context-dependent"
+
+template_slots:
+  required: ["CHECK_TITLE", "SEVERITY", "ACTION"]
+  optional: ["EVIDENCE_SUMMARY", "ARTICLE_REF", "CONFIDENCE"]
+
+checks:
+  # ── CAPACITY / الأهلية ──────────────────────────────────────────
+  - check_id: CAP-01
+    title_en: "Party lacking discretion"
+    title_ar: "عديم التمييز"
+    article_ref: "Art. 110"
+    rule: "A minor lacking discretion (under 7, or without discretion) has no capacity; all their acts are void."
+    criticality: P0
+
+  - check_id: CAP-02
+    title_en: "Discerning minor's acts"
+    title_ar: "تصرفات الصبي المميز"
+    article_ref: "Art. 111"
+    rule: "A discerning minor: purely beneficial acts valid, purely harmful acts void, acts in between voidable at the minor's option."
+    criticality: P0
+
+  - check_id: CAP-03
+    title_en: "Age of majority / full capacity"
+    title_ar: "سن الرشد وكمال الأهلية"
+    article_ref: "Art. 44"
+    rule: "Full capacity requires majority (21 Gregorian years), sound mind, and no interdiction."
+    criticality: P1
+
+  - check_id: CAP-04
+    title_en: "Interdiction (insanity / feeble-mindedness)"
+    title_ar: "الحجر للجنون أو العته"
+    article_ref: "Art. 114"
+    rule: "Acts of an interdicted person are void if made after the interdiction is registered."
+    criticality: P1
+
+  - check_id: CAP-05
+    title_en: "Fraudulent concealment of incapacity"
+    title_ar: "إخفاء نقص الأهلية بطرق احتيالية"
+    article_ref: "Art. 119"
+    rule: "An incapable party who used fraudulent means to hide incapacity is liable in damages and may lose avoidance."
+    criticality: P2
+
+  # ── CONSENT / عيوب الرضا ────────────────────────────────────────
+  - check_id: CON-01
+    title_en: "Essential mistake"
+    title_ar: "الغلط الجوهري"
+    article_ref: "Art. 120-121"
+    rule: "An essential mistake makes a contract voidable if the other party shared it, knew of it, or could easily have detected it."
+    criticality: P1
+
+  - check_id: CON-02
+    title_en: "Mistake of law"
+    title_ar: "الغلط في القانون"
+    article_ref: "Art. 122"
+    rule: "A mistake of law voids the contract under the same conditions as a mistake of fact."
+    criticality: P2
+
+  - check_id: CON-03
+    title_en: "Clerical / calculation mistake"
+    title_ar: "غلطات القلم والحساب"
+    article_ref: "Art. 123"
+    rule: "Mere clerical or calculation mistakes do not affect validity but must be corrected."
+    criticality: P2
+
+  - check_id: CON-04
+    title_en: "Consent obtained by fraud (tadlis)"
+    title_ar: "التدليس"
+    article_ref: "Art. 125-126"
+    rule: "Consent procured by fraud (tadlis) renders the contract voidable. Intentional silence about a material fact also constitutes fraud. Third-party fraud voids only if the other party knew or should have known (Art. 126)."
+    criticality: P1
+
+  - check_id: CON-05
+    title_en: "Consent obtained by duress (ikrah)"
+    title_ar: "الإكراه"
+    article_ref: "Art. 127-128"
+    rule: "Consent procured by duress (ikrah) renders the contract voidable when a party contracted under justifiable fear of a serious and imminent danger to life, limb, honour, or property. Third-party duress voids only if the other party knew or should have known (Art. 128)."
+    criticality: P1
+
+  # ── OBJECT & CAUSE / المحل والسبب ───────────────────────────────
+  - check_id: OBJ-01
+    title_en: "Object within commerce"
+    title_ar: "المحل قابل للتعامل"
+    article_ref: "Art. 81"
+    rule: "The object must be a thing not excluded from dealing by its nature or by law."
+    criticality: P0
+
+  - check_id: OBJ-02
+    title_en: "Lawful object and cause (public order / morals)"
+    title_ar: "مشروعية المحل والسبب"
+    article_ref: "Art. 135-136"
+    rule: "A contract whose object is contrary to public order or morals is void (Art. 135). A contract whose cause is absent, unlawful, or contrary to public order or morals is void (Art. 136)."
+    criticality: P0
+
+  # ── FORMATION / الانعقاد ────────────────────────────────────────
+  - check_id: FRM-01
+    title_en: "Matching declarations of intent"
+    title_ar: "تطابق الإيجاب والقبول"
+    article_ref: "Art. 89"
+    rule: "A contract forms only on the exchange of two matching declarations of intent, subject to any required formalities."
+    criticality: P1
+
+  - check_id: FRM-02
+    title_en: "Adhesion-contract terms"
+    title_ar: "شروط عقد الإذعان"
+    article_ref: "Art. 100"
+    rule: "In adhesion contracts, acceptance is confined to standard terms; flag abusive standard clauses for review."
+    criticality: P2
+
+  - check_id: FRM-03
+    title_en: "Earnest money (arbun)"
+    title_ar: "العربون"
+    article_ref: "Art. 103"
+    rule: "Payment of arbun implies each party may resile (forfeit / return double) unless the contract states otherwise."
+    criticality: P2
