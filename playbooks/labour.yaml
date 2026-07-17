@@ -1,0 +1,15 @@
+playbook_id: egypt_labour_law_experimental_v1
+version: "0.1-draft"
+status: experimental_not_for_legal_accuracy_claims
+source_requirement: "Validate every cited article against the current Egyptian Labour Law 14/2025 before enabling audit findings."
+scope: "Employment contracts, wages, working time, termination, and employment rights under Egyptian labour law."
+
+global_defaults:
+  evidence_required_for: ["CONTRADICTED"]
+  label_to_default_decision:
+    CONTRADICTED: { severity: HIGH, action: ESCALATE }
+    NOT_MENTIONED: { severity: MEDIUM, action: CLARIFY }
+
+# This is intentionally not a legal audit checklist yet. The Labour specialist may
+# answer only from retrieved corpus articles until a lawyer validates specific checks.
+checks: []

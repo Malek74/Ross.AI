@@ -1,193 +1,145 @@
-"""
-agents/base_agent.py
-====================
-DomainAgent: an LLM-in-a-tool-use-loop that audits a contract against
-one domain's statute index + playbook rubric.
-
-This is an AGENT, not a workflow:
-  - Goal-driven (not a fixed checklist loop)
-  - Autonomous tool selection (the LLM picks which tool to call next)
-  - Bounded by max_steps and evidence validation at the tool boundary
-"""
+"""Reusable autonomous, tool-calling specialist for one legal domain."""
 
 from __future__ import annotations
 
 import json
-import logging
-import time
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+import yaml
+
+from src.agents.tools import DomainTools
+from src.embeddings import DomainIndex
 from src.llm_client import get_client, settings
-from src.playbook_loader import load_playbook, format_rubric
-from src.prompt_templates import SPECIALIST_SYSTEM, SPECIALIST_USER
-from src.agents.tools import TOOL_SCHEMAS, ToolContext, execute_tool
 
-logger = logging.getLogger(__name__)
+_ROOT = Path(__file__).resolve().parents[2]
 
 
-@dataclass
-class AuditResult:
-    domain: str
-    flags: list[dict]
-    summary: str
-    steps: int
-    tool_trace: list[dict]
-    elapsed_s: float
-
-
-@dataclass
 class DomainAgent:
-    name: str
-    index_path: str
-    playbook_path: str
-    domain_label: str = ""
-    law_ref: str = ""
+    """An LLM specialist whose strategy is controlled by tool calls, not Python checks."""
 
-    _index: Any = field(default=None, init=False, repr=False)
-    _playbook: dict = field(default_factory=dict, init=False, repr=False)
+    def __init__(
+        self,
+        name: str,
+        index_path: str | Path,
+        playbook_path: str | Path,
+        domain_label: str = "",
+        law_ref: str = "",
+    ) -> None:
+        self.name = name
+        self.index_path = Path(index_path)
+        self.playbook_path = Path(playbook_path)
+        self.domain_label = domain_label or name.title()
+        self.law_ref = law_ref or f"Egyptian {name.title()} Law"
 
-    def __post_init__(self):
-        if not self.domain_label:
-            self.domain_label = self.name.title() + " Code"
-        if not self.law_ref:
-            self.law_ref = "Egyptian Civil Code (Law 131/1948)"
-
-    @property
-    def index(self):
-        if self._index is None:
-            from src.embeddings import DomainIndex
-            self._index = DomainIndex.load(self.name)
-        return self._index
-
-    @property
-    def playbook(self):
-        if not self._playbook:
-            self._playbook = load_playbook(self.playbook_path)
-        return self._playbook
-
-    def run(self, contract_text: str, *, max_steps: int | None = None) -> AuditResult:
-        max_steps = max_steps or settings.agent_max_steps
-        rubric = format_rubric(self.playbook)
-
-        system_prompt = SPECIALIST_SYSTEM.format(
-            domain_label=self.domain_label,
-            law_ref=self.law_ref,
-            rubric=rubric,
-        )
-        user_prompt = SPECIALIST_USER.format(
-            contract_text=contract_text,
-            domain_label=self.domain_label,
+    def run(self, contract: str) -> dict[str, Any]:
+        """Audit a contract. The model decides retrieval and risk-flagging order."""
+        return self._agent_loop(
+            goal=f"Audit this contract under {self.name} law. Produce a cited risk report.",
+            contract=contract,
+            question=None,
+            mode="audit",
         )
 
-        messages: list[dict] = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+    def answer(self, question: str, contract: str | None = None) -> dict[str, Any]:
+        """Answer a legal question using only this domain's corpus and optional contract."""
+        return self._agent_loop(
+            goal=f"Answer the user's question under {self.name} law with cited articles. State uncertainty when the available sources do not support an answer.",
+            contract=contract or "",
+            question=question,
+            mode="chat",
+        )
+
+    def _agent_loop(self, *, goal: str, contract: str, question: str | None, mode: Literal["audit", "chat"]) -> dict[str, Any]:
+        index = self._load_index()
+        tools = DomainTools(index=index, contract=contract)
+        rubric = self._load_playbook()
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": self._system_prompt(goal, rubric, mode)},
+            {"role": "user", "content": self._input_prompt(contract, question, mode)},
         ]
 
-        ctx = ToolContext(
-            domain_index=self.index,
-            contract_text=contract_text,
-        )
-
         client = get_client()
-        tool_trace: list[dict] = []
-        t0 = time.time()
-
-        for step in range(max_steps):
-            resp = client.chat.completions.create(
-                model=settings.llm_model,
-                messages=messages,
-                tools=TOOL_SCHEMAS,
-                temperature=0.0,
-                max_tokens=4096,
-                extra_body=settings.extra_body,
+        final_text = ""
+        trace: list[dict[str, Any]] = []
+        for step in range(settings.agent_max_steps):
+            response = client.chat.completions.create(
+                model=settings.llm_model, messages=messages, tools=tools.definitions(),
+                tool_choice="auto", temperature=0.0, max_tokens=2048, extra_body=settings.extra_body,
             )
+            message = response.choices[0].message
+            if message.content:
+                final_text = message.content
+            messages.append(message.model_dump(exclude_none=True))
 
-            msg = resp.choices[0].message
-            messages.append(_message_to_dict(msg))
-
-            if not msg.tool_calls:
+            if not message.tool_calls:
                 break
-
-            for tc in msg.tool_calls:
-                fn_name = tc.function.name
+            for call in message.tool_calls:
                 try:
-                    fn_args = json.loads(tc.function.arguments)
+                    arguments = json.loads(call.function.arguments or "{}")
                 except json.JSONDecodeError:
-                    fn_args = {}
-
-                result = execute_tool(fn_name, fn_args, ctx)
-
-                trace_entry = {
-                    "step": step,
-                    "tool": fn_name,
-                    "args": fn_args,
-                    "result_preview": _preview(result),
-                }
-                tool_trace.append(trace_entry)
-                logger.info("Step %d: %s(%s) → %s", step, fn_name, _compact(fn_args), _preview(result))
-
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": json.dumps(result, ensure_ascii=False),
-                })
-
-            if ctx.finished:
+                    result = {"error": "Tool arguments were not valid JSON."}
+                else:
+                    result = tools.call(call.function.name, arguments)
+                trace.append({"step": step + 1, "tool": call.function.name, "result": result})
+                messages.append({"role": "tool", "tool_call_id": call.id, "content": json.dumps(result, ensure_ascii=False)})
+            if tools.finished_summary is not None:
+                final_text = tools.finished_summary
                 break
 
-        elapsed = time.time() - t0
+        if not final_text:
+            final_text = "The agent reached its step limit before producing a supported final answer."
+        return {
+            "domain": self.name, "mode": mode, "summary": final_text,
+            "flags": tools.flags, "trace": trace,
+            "status": "finished" if tools.finished_summary is not None else "step_limit_or_text_response",
+        }
 
-        return AuditResult(
-            domain=self.name,
-            flags=ctx.flags,
-            summary=ctx.finish_summary or f"Completed in {step + 1} steps",
-            steps=step + 1,
-            tool_trace=tool_trace,
-            elapsed_s=round(elapsed, 2),
-        )
+    def _load_index(self) -> DomainIndex:
+        root = self.index_path if self.index_path.is_absolute() else _ROOT / self.index_path
+        return DomainIndex.load(self.name, index_root=root.parent)
+
+    def _load_playbook(self) -> dict[str, Any]:
+        path = self.playbook_path if self.playbook_path.is_absolute() else _ROOT / self.playbook_path
+        with path.open(encoding="utf-8") as file:
+            return yaml.safe_load(file) or {}
+
+    def _system_prompt(self, goal: str, rubric: dict[str, Any], mode: str) -> str:
+        rubric_text = yaml.safe_dump(rubric, allow_unicode=True, sort_keys=False)
+        return f"""You are the {self.domain_label} specialist in a grounded Egyptian-law paralegal.
+LEGAL DOMAIN: {self.law_ref}
+GOAL: {goal}
+MODE: {mode}
+Use tools to retrieve legal authority before making legal claims. You may only cite articles returned by a tool. Do not invent article numbers, contract terms, facts, or quotations. In audit mode, call flag_risk only for a real contract substring. In chat mode, do not create risk flags unless explicitly asked to audit. When evidence is insufficient, say so. Finish by calling finish.
+
+RUBRIC (guidance, not a mandatory workflow):
+{rubric_text}"""
+
+    @staticmethod
+    def _input_prompt(contract: str, question: str | None, mode: str) -> str:
+        parts = [f"Requested mode: {mode}."]
+        if question:
+            parts.append(f"User question:\n{question}")
+        if contract:
+            parts.append(f"Submitted contract:\n{contract}")
+        return "\n\n".join(parts)
 
 
-@dataclass
 class StubAgent:
-    name: str
+    """Registry placeholder for a recognized legal domain without a usable corpus."""
 
-    def run(self, contract_text: str, **kwargs) -> dict:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def run(self, contract: str, **_: Any) -> dict[str, Any]:
+        return self._unavailable()
+
+    def answer(self, question: str, contract: str | None = None, **_: Any) -> dict[str, Any]:
+        return self._unavailable()
+
+    def _unavailable(self) -> dict[str, Any]:
         return {
             "domain": self.name,
             "status": "recognized_not_available",
             "message": f"The {self.name} specialist is registered but not yet available.",
         }
-
-
-def _message_to_dict(msg) -> dict:
-    d: dict[str, Any] = {"role": msg.role}
-    if msg.content:
-        d["content"] = msg.content
-    if msg.tool_calls:
-        d["tool_calls"] = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-            }
-            for tc in msg.tool_calls
-        ]
-    return d
-
-
-def _preview(obj: dict, max_len: int = 120) -> str:
-    s = json.dumps(obj, ensure_ascii=False)
-    return s[:max_len] + "…" if len(s) > max_len else s
-
-
-def _compact(obj: dict) -> str:
-    parts = []
-    for k, v in obj.items():
-        sv = str(v)
-        if len(sv) > 40:
-            sv = sv[:37] + "…"
-        parts.append(f"{k}={sv!r}")
-    return ", ".join(parts)

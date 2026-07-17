@@ -8,6 +8,7 @@ to know which domains exist and which are live.
 from __future__ import annotations
 
 from src.agents.base_agent import DomainAgent, StubAgent
+from src.agents.labour_agent import create_labour_agent
 
 REGISTRY: dict[str, dict] = {
     "civil": {
@@ -23,10 +24,10 @@ REGISTRY: dict[str, dict] = {
         "description": "Contracts, obligations, capacity, consent, property, civil liability.",
     },
     "labour": {
-        "agent": StubAgent("labour"),
+        "agent": create_labour_agent(),
         "live": False,
         "label": "Labour",
-        "description": "Employment contracts, wages, termination (Labour Law 14/2025).",
+        "description": "Employment contracts, wages, termination (Labour Law 14/2025; corpus and playbook validation pending).",
     },
     "commercial": {
         "agent": StubAgent("commercial"),
