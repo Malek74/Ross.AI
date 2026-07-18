@@ -33,7 +33,7 @@ def _normalize_for_match(text: str) -> str:
     return text
 
 
-def validate_quote(quote: str, contract_text: str, threshold: float = 0.75) -> QuoteMatch:
+def validate_quote(quote: str, contract_text: str, threshold: float = 0.55) -> QuoteMatch:
     if not quote or not contract_text:
         return QuoteMatch(False, -1, -1, "", 0.0)
 

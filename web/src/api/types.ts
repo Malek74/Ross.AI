@@ -52,6 +52,7 @@ export interface ChatMessage {
   content: string;
   files?: FileAttachment[];
   artifact?: Artifact | null;
+  steps?: StepEvent[];
   timestamp: number;
 }
 
@@ -68,6 +69,7 @@ export interface Artifact {
   title: string;
   data: any;
   contractText?: string;
+  file?: File;
 }
 
 export interface ReviseResult {
@@ -92,4 +94,18 @@ export interface CostSummary {
   total_calls: number;
   total_tokens: number;
   by_model: Record<string, { calls: number; prompt_tokens: number; completion_tokens: number; cost_usd: number }>;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  timestamp: number;
+}
+
+export interface StepEvent {
+  action: string;
+  detail: string;
+  domain?: string;
+  reason?: string;
 }

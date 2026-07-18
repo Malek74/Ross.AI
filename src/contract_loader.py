@@ -31,6 +31,34 @@ _CLAUSE_PATTERNS = [
 ]
 
 
+def _is_garbled(text: str, threshold: float = 0.15) -> bool:
+    """Detect garbled PDF extraction (e.g. wrong font cmap for Arabic)."""
+    if not text.strip():
+        return True
+    canadian_aboriginal = sum(1 for c in text if "᐀" <= c <= "ᙿ")
+    private_use = sum(1 for c in text if "" <= c <= "")
+    bad = canadian_aboriginal + private_use
+    return bad / max(len(text), 1) > threshold
+
+
+def _ocr_pdf(path: Path) -> str:
+    """Extract text from PDF pages via Tesseract OCR."""
+    import pymupdf
+    from PIL import Image
+    import pytesseract
+    import io
+
+    doc = pymupdf.open(str(path))
+    pages = []
+    for page in doc:
+        pix = page.get_pixmap(dpi=300)
+        img = Image.open(io.BytesIO(pix.tobytes("png")))
+        text = pytesseract.image_to_string(img, lang="ara+eng")
+        pages.append(text)
+    doc.close()
+    return "\n".join(pages)
+
+
 def _extract_text_pdf(path: Path) -> str:
     import pymupdf
     doc = pymupdf.open(str(path))
@@ -38,7 +66,10 @@ def _extract_text_pdf(path: Path) -> str:
     for page in doc:
         pages.append(page.get_text())
     doc.close()
-    return "\n".join(pages)
+    text = "\n".join(pages)
+    if _is_garbled(text):
+        return _ocr_pdf(path)
+    return text
 
 
 def _extract_text_docx(path: Path) -> str:

@@ -11,7 +11,7 @@ import yaml
 from src.agents.tools import DomainTools
 from src.cost_tracker import tracker
 from src.embeddings import DomainIndex
-from src.llm_client import get_client, settings
+from src.llm_client import create_completion, settings
 from src.prompt_templates import (
     SPECIALIST_SYSTEM_AUDIT,
     SPECIALIST_SYSTEM_CHAT,
@@ -44,34 +44,37 @@ class DomainAgent:
         self.domain_label = domain_label or name.title()
         self.law_ref = law_ref or f"Egyptian {name.title()} Law"
 
-    def run(self, contract: str) -> dict[str, Any]:
+    def run(self, contract: str, lang: str = "en") -> dict[str, Any]:
         """Audit a contract. The model decides retrieval and risk-flagging order."""
         return self._agent_loop(
             goal=f"Audit this contract under {self.name} law. Produce a cited risk report.",
             contract=contract,
             question=None,
             mode="audit",
+            lang=lang,
         )
 
-    def answer(self, question: str, contract: str | None = None) -> dict[str, Any]:
+    def answer(self, question: str, contract: str | None = None, lang: str = "en") -> dict[str, Any]:
         """Answer a legal question using only this domain's corpus and optional contract."""
         return self._agent_loop(
             goal=f"Answer the user's question under {self.name} law with cited articles. State uncertainty when the available sources do not support an answer.",
             contract=contract or "",
             question=question,
             mode="chat",
+            lang=lang,
         )
 
-    def revise(self, contract: str, flag_ids: list[str] | None = None) -> dict[str, Any]:
+    def revise(self, contract: str, flag_ids: list[str] | None = None, lang: str = "en") -> dict[str, Any]:
         """Revise flagged clauses in a contract to comply with this domain's law."""
         return self._agent_loop(
             goal=f"Revise the flagged clauses in this contract to comply with {self.name} law. Preserve the original intent. Use revise_clause for each fix, citing the governing article.",
             contract=contract,
             question=None,
             mode="revise",
+            lang=lang,
         )
 
-    def draft(self, contract_type: str, requirements: str = "") -> dict[str, Any]:
+    def draft(self, contract_type: str, requirements: str = "", lang: str = "en") -> dict[str, Any]:
         """Draft a new contract grounded in this domain's statute corpus."""
         prompt = f"Draft a {contract_type} contract compliant with Egyptian {self.name} law."
         if requirements:
@@ -81,6 +84,7 @@ class DomainAgent:
             contract="",
             question=prompt,
             mode="draft",
+            lang=lang,
         )
 
     def _agent_loop(
@@ -90,20 +94,20 @@ class DomainAgent:
         contract: str,
         question: str | None,
         mode: Literal["audit", "chat", "revise", "draft"],
+        lang: str = "en",
     ) -> dict[str, Any]:
         index = self._load_index()
         tools = DomainTools(index=index, contract=contract)
         rubric = self._load_playbook()
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self._system_prompt(rubric, mode)},
+            {"role": "system", "content": self._system_prompt(rubric, mode, lang)},
             {"role": "user", "content": self._input_prompt(contract, question, mode)},
         ]
 
-        client = get_client()
         final_text = ""
         trace: list[dict[str, Any]] = []
         for step in range(settings.agent_max_steps):
-            response = client.chat.completions.create(
+            response = create_completion(
                 model=settings.llm_model, messages=messages, tools=tools.definitions(mode=mode),
                 tool_choice="auto", temperature=0.0, max_tokens=2048, extra_body=settings.extra_body,
             )
@@ -150,7 +154,7 @@ class DomainAgent:
         with path.open(encoding="utf-8") as file:
             return yaml.safe_load(file) or {}
 
-    def _system_prompt(self, rubric: dict[str, Any], mode: str) -> str:
+    def _system_prompt(self, rubric: dict[str, Any], mode: str, lang: str = "en") -> str:
         rubric_text = yaml.safe_dump(rubric, allow_unicode=True, sort_keys=False)
         templates = {
             "audit": SPECIALIST_SYSTEM_AUDIT,
@@ -159,11 +163,14 @@ class DomainAgent:
             "draft": SPECIALIST_SYSTEM_DRAFT,
         }
         template = templates.get(mode, SPECIALIST_SYSTEM_AUDIT)
-        return template.format(
+        prompt = template.format(
             domain_label=self.domain_label,
             law_ref=self.law_ref,
             rubric=rubric_text,
         )
+        if lang == "ar":
+            prompt += "\n\nLANGUAGE: You MUST write ALL output in Arabic (العربية) — summaries, rationale, flag descriptions, everything user-facing."
+        return prompt
 
     def _input_prompt(self, contract: str, question: str | None, mode: str) -> str:
         if mode == "audit":

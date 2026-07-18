@@ -107,6 +107,83 @@ body {
 
 [dir="rtl"] { font-family: var(--font-arabic); }
 
+/* Markdown prose in assistant messages */
+.prose-msg h1, .prose-msg h2, .prose-msg h3 {
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.4em;
+  color: var(--text);
+}
+.prose-msg h1 { font-size: 1.25em; }
+.prose-msg h2 { font-size: 1.1em; }
+.prose-msg h3 { font-size: 1em; }
+.prose-msg p { margin: 0.4em 0; }
+.prose-msg ul, .prose-msg ol { padding-inline-start: 1.5em; margin: 0.4em 0; }
+.prose-msg li { margin: 0.2em 0; }
+.prose-msg li::marker { color: var(--text-muted); }
+.prose-msg strong { font-weight: 600; color: var(--text); }
+.prose-msg code {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15em 0.35em;
+  font-size: 0.88em;
+}
+.prose-msg pre {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.prose-msg pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+.prose-msg blockquote {
+  border-inline-start: 3px solid var(--accent);
+  padding-inline-start: 1em;
+  margin: 0.5em 0;
+  color: var(--text-secondary);
+}
+.prose-msg a {
+  color: var(--accent-light);
+  text-decoration: underline;
+}
+.prose-msg hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}
+
+/* PDF-like page in artifact panel */
+.pdf-page {
+  box-shadow: 0 1px 4px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
+}
+.pdf-prose h1, .pdf-prose h2, .pdf-prose h3 {
+  font-weight: 700;
+  color: #1a1a1a;
+  margin-top: 1em;
+  margin-bottom: 0.4em;
+}
+.pdf-prose h1 { font-size: 1.3em; border-bottom: 2px solid #e5e7eb; padding-bottom: 0.3em; }
+.pdf-prose h2 { font-size: 1.1em; }
+.pdf-prose h3 { font-size: 1em; }
+.pdf-prose p { margin: 0.4em 0; }
+.pdf-prose ul, .pdf-prose ol { padding-inline-start: 1.5em; margin: 0.4em 0; }
+.pdf-prose li { margin: 0.2em 0; }
+.pdf-prose li::marker { color: #999; }
+.pdf-prose strong { font-weight: 700; }
+.pdf-prose code { background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 3px; padding: 0.1em 0.3em; font-size: 0.88em; }
+.pdf-prose blockquote { border-inline-start: 3px solid #6366f1; padding-inline-start: 1em; margin: 0.5em 0; color: #555; }
+.pdf-prose table { width: 100%; border-collapse: collapse; margin: 0.5em 0; font-size: 12px; }
+.pdf-prose th, .pdf-prose td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: start; }
+.pdf-prose th { background: #f9fafb; font-weight: 600; }
+.pdf-prose hr { border: none; border-top: 1px solid #e5e7eb; margin: 1em 0; }
+.pdf-prose a { color: #6366f1; text-decoration: underline; }
+
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -121,3 +198,8 @@ body {
 .typing-dot:nth-child(1) { animation-delay: 0s; }
 .typing-dot:nth-child(2) { animation-delay: 0.2s; }
 .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.animate-spin { animation: spin 1s linear infinite; }

@@ -1,23 +1,26 @@
 import { useEffect, useRef } from "react";
 import { FileText, ExternalLink } from "lucide-react";
-import type { ChatMessage, Artifact } from "../api/types";
+import Markdown from "react-markdown";
+import type { ChatMessage, Artifact, StepEvent } from "../api/types";
+import ThinkingSteps from "./ThinkingSteps";
 
 interface Props {
   messages: ChatMessage[];
   loading: boolean;
+  steps: StepEvent[];
   onArtifactClick: (artifact: Artifact) => void;
 }
 
-export default function MessageList({ messages, loading, onArtifactClick }: Props) {
+export default function MessageList({ messages, loading, steps, onArtifactClick }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  }, [messages, loading, steps]);
 
   return (
     <div className="px-4 py-6 space-y-6" style={{ maxWidth: "48rem", margin: "0 auto" }}>
-      {messages.map((msg) => (
+      {messages.map((msg, msgIdx) => (
         <div key={msg.id} className="animate-fade-in">
           {msg.role === "user" ? (
             <div className="flex justify-end">
@@ -41,9 +44,12 @@ export default function MessageList({ messages, loading, onArtifactClick }: Prop
             </div>
           ) : (
             <div className="flex justify-start">
-              <div className="max-w-[85%] space-y-3">
-                <div className="text-[15px] leading-relaxed whitespace-pre-wrap" style={{ color: "var(--text)" }}>
-                  {msg.content}
+              <div className="max-w-[85%] space-y-1">
+                {msg.steps && msg.steps.length > 0 && (
+                  <ThinkingSteps steps={msg.steps} isActive={false} />
+                )}
+                <div className="prose-msg text-[15px] leading-relaxed" style={{ color: "var(--text)" }}>
+                  <Markdown>{msg.content}</Markdown>
                 </div>
                 {msg.artifact && (
                   <button
@@ -71,10 +77,16 @@ export default function MessageList({ messages, loading, onArtifactClick }: Prop
 
       {loading && (
         <div className="flex justify-start animate-fade-in">
-          <div className="flex gap-1.5 px-4 py-3">
-            <div className="w-2 h-2 rounded-full typing-dot" style={{ background: "var(--text-muted)" }} />
-            <div className="w-2 h-2 rounded-full typing-dot" style={{ background: "var(--text-muted)" }} />
-            <div className="w-2 h-2 rounded-full typing-dot" style={{ background: "var(--text-muted)" }} />
+          <div className="max-w-[85%] space-y-1">
+            {steps.length > 0 ? (
+              <ThinkingSteps steps={steps} isActive={true} />
+            ) : (
+              <div className="flex gap-1.5 px-4 py-3">
+                <div className="w-2 h-2 rounded-full typing-dot" style={{ background: "var(--text-muted)" }} />
+                <div className="w-2 h-2 rounded-full typing-dot" style={{ background: "var(--text-muted)" }} />
+                <div className="w-2 h-2 rounded-full typing-dot" style={{ background: "var(--text-muted)" }} />
+              </div>
+            )}
           </div>
         </div>
       )}

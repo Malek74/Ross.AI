@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.llm_client import get_client, settings
+from src.llm_client import create_completion, settings
 from src.prompt_templates import SYNTHESIZER_SYSTEM
 
 
@@ -13,6 +13,7 @@ def synthesize_flags(
     consultations: dict[str, dict[str, Any]],
     *,
     fallback_summary: str = "",
+    lang: str = "en",
 ) -> dict[str, Any]:
     """Merge specialist results into one cited memo via an LLM call.
 
@@ -31,12 +32,41 @@ def synthesize_flags(
         if result.get("status") == "recognized_not_available"
     ]
 
+    fallback_summary = _clean_fallback(fallback_summary)
+
     all_flags_count = sum(len(r.get("flags", [])) for r in live_results.values())
 
     if len(live_results) <= 1 and all_flags_count <= 1:
-        return _fast_dedup(consultations, fallback_summary, stub_domains)
+        return _normalize_memo(_fast_dedup(consultations, fallback_summary, stub_domains))
 
-    return _llm_synthesize(live_results, stub_domains, fallback_summary)
+    return _normalize_memo(_llm_synthesize(live_results, stub_domains, fallback_summary, lang))
+
+
+def _clean_fallback(text: str) -> str:
+    """If the model returned a raw/fenced JSON memo as plain text, extract its summary."""
+    if not text or ("{" not in text):
+        return text
+    candidate = text[text.index("```"):] if "```" in text else text[text.index("{"):]
+    try:
+        parsed = _parse_json(candidate)
+        if isinstance(parsed, dict) and parsed.get("summary"):
+            return str(parsed["summary"])
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return text
+
+
+def _normalize_memo(memo: dict[str, Any]) -> dict[str, Any]:
+    """Normalize flag fields so the UI can rely on them (lowercase severity, non-empty label)."""
+    for flags in memo.get("flags_by_domain", {}).values():
+        for flag in flags:
+            sev = str(flag.get("severity") or "medium").lower()
+            flag["severity"] = sev if sev in {"high", "medium", "low"} else "medium"
+            if not flag.get("label"):
+                rationale = str(flag.get("rationale") or "")
+                first = rationale.split("۔")[0].split(".")[0].split("،")[0].split(",")[0]
+                flag["label"] = (first[:80] + ("…" if len(first) > 80 else "")) if first else flag.get("article_ref", "Flag")
+    return memo
 
 
 def _fast_dedup(
@@ -74,6 +104,7 @@ def _llm_synthesize(
     live_results: dict[str, dict[str, Any]],
     stub_domains: list[str],
     fallback_summary: str,
+    lang: str = "en",
 ) -> dict[str, Any]:
     """Use the LLM to merge multi-domain findings with conflict resolution."""
     specialist_data: list[dict[str, Any]] = []
@@ -95,11 +126,14 @@ def _llm_synthesize(
         + json.dumps(specialist_data, ensure_ascii=False, indent=2)
     )
 
-    client = get_client()
-    response = client.chat.completions.create(
+    system_prompt = SYNTHESIZER_SYSTEM
+    if lang == "ar":
+        system_prompt += "\n\nLANGUAGE: Write the summary and ALL user-facing text in Arabic (العربية)."
+
+    response = create_completion(
         model=settings.llm_model,
         messages=[
-            {"role": "system", "content": SYNTHESIZER_SYSTEM},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
         temperature=0.0,

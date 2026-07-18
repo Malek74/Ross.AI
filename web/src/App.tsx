@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { fetchAgents, auditContract, chatWithParalegal, reviseContract, draftContract } from "./api/client";
-import type { AgentInfo, AuditResult, ChatMessage, FileAttachment, Artifact } from "./api/types";
+import { fetchAgents, auditContractStream, chatWithParalegalStream, reviseContract, draftContract, extractText, classifyIntent } from "./api/client";
+import type { AgentInfo, AuditResult, ChatMessage, FileAttachment, Artifact, Conversation, StepEvent } from "./api/types";
 import type { Lang } from "./i18n";
 import { t, isRtl } from "./i18n";
 import type { Theme } from "./context";
@@ -10,9 +10,23 @@ import ChatInput from "./components/ChatInput";
 import MessageList from "./components/MessageList";
 import ArtifactPanel from "./components/ArtifactPanel";
 import Suggestions from "./components/Suggestions";
+import HistorySidebar from "./components/HistorySidebar";
 
 let msgId = 0;
 const nextId = () => `msg-${++msgId}`;
+
+const STORAGE_KEY = "rossai-conversations";
+
+function loadConversations(): Conversation[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveConversations(convos: Conversation[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(convos));
+}
 
 export default function App() {
   const [lang, setLang] = useState<Lang>("en");
@@ -24,10 +38,14 @@ export default function App() {
   const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [liveSteps, setLiveSteps] = useState<StepEvent[]>([]);
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<FileAttachment[]>([]);
   const [contractText, setContractText] = useState("");
   const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>(loadConversations);
+  const [activeConvoId, setActiveConvoId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -42,24 +60,108 @@ export default function App() {
     fetchAgents().then(setAgents).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (messages.length > 0) {
+      const title = messages[0].content.slice(0, 50) || "New conversation";
+      const convo: Conversation = {
+        id: activeConvoId || `conv-${Date.now()}`,
+        title,
+        messages,
+        timestamp: Date.now(),
+      };
+      if (!activeConvoId) setActiveConvoId(convo.id);
+      setConversations((prev) => {
+        const existing = prev.findIndex((c) => c.id === convo.id);
+        const updated = existing >= 0
+          ? prev.map((c) => (c.id === convo.id ? convo : c))
+          : [convo, ...prev];
+        saveConversations(updated);
+        return updated;
+      });
+    }
+  }, [messages]);
+
   const hasMessages = messages.length > 0;
 
-  const addMessage = useCallback((role: "user" | "assistant", content: string, files?: FileAttachment[], art?: Artifact | null) => {
-    const msg: ChatMessage = { id: nextId(), role, content, files, artifact: art, timestamp: Date.now() };
+  const addMessage = useCallback((role: "user" | "assistant", content: string, files?: FileAttachment[], art?: Artifact | null, steps?: StepEvent[]) => {
+    const msg: ChatMessage = { id: nextId(), role, content, files, artifact: art, steps, timestamp: Date.now() };
     setMessages((prev) => [...prev, msg]);
     return msg;
   }, []);
 
+  const startNewChat = () => {
+    setMessages([]);
+    setActiveConvoId(null);
+    setArtifact(null);
+    setContractText("");
+    setAuditResult(null);
+    setUploadedFiles([]);
+  };
+
+  const loadConversation = (convo: Conversation) => {
+    setMessages(convo.messages);
+    setActiveConvoId(convo.id);
+    setArtifact(null);
+    setSidebarOpen(false);
+  };
+
+  const deleteConversation = (id: string) => {
+    setConversations((prev) => {
+      const updated = prev.filter((c) => c.id !== id);
+      saveConversations(updated);
+      return updated;
+    });
+    if (activeConvoId === id) startNewChat();
+  };
+
+  const clearAllConversations = () => {
+    saveConversations([]);
+    setConversations([]);
+    startNewChat();
+  };
+
   const extractFileTexts = async (files: FileAttachment[]): Promise<FileAttachment[]> => {
     return Promise.all(
       files.map(async (f) => {
-        if (f.type === "text/plain" && !f.text) {
+        if (f.text) return f;
+        if (f.type === "text/plain") {
           const text = await f.file.text();
           return { ...f, text };
         }
-        return f;
+        const text = await extractText(f.file);
+        return { ...f, text };
       }),
     );
+  };
+
+  const friendlyError = (msg: string): string => {
+    console.error("[Ross.AI error]", msg);
+    const lower = msg.toLowerCase();
+    if (lower.includes("credit limit") || lower.includes("key limit") || (lower.includes("limit") && lower.includes("exceeded")))
+      return s.errorCredits;
+    if (lower.includes("rate limit") || lower.includes("rate-limited") || lower.includes("overloaded") || msg.includes("429"))
+      return s.errorRateLimit;
+    if (msg.includes("401") || lower.includes("unauthorized") || lower.includes("invalid") && lower.includes("key"))
+      return s.errorApiKey;
+    if (lower.includes("failed to fetch") || lower.includes("networkerror") || lower.includes("econnrefused"))
+      return s.errorNetwork;
+    return `${s.errorPrefix} ${msg}`;
+  };
+
+  const handleStreamResult = (result: AuditResult, enrichedFiles: FileAttachment[], collectedSteps: StepEvent[]) => {
+    const totalFlags = Object.values(result.flags_by_domain || {}).reduce((sum, f) => sum + f.length, 0);
+    const ct = contractText || enrichedFiles[0]?.text || "";
+    const title = totalFlags > 0
+      ? `${s.report} — ${totalFlags} ${totalFlags !== 1 ? s.flags : s.flag}`
+      : s.report;
+    const srcFile = enrichedFiles[0]?.file;
+    const art: Artifact = {
+      type: "audit", title, data: result, contractText: ct,
+      file: srcFile && srcFile.type === "application/pdf" ? srcFile : undefined,
+    };
+    setArtifact(art);
+    setAuditResult(result);
+    addMessage("assistant", result.summary, undefined, art, collectedSteps);
   };
 
   const handleSend = async (text: string, files: FileAttachment[]) => {
@@ -67,62 +169,80 @@ export default function App() {
     const enrichedFiles = await extractFileTexts(files);
     addMessage("user", text, enrichedFiles.length ? enrichedFiles : undefined);
     setLoading(true);
+    setLiveSteps([]);
 
     try {
       const hasFiles = enrichedFiles.length > 0;
-      const intent = detectIntent(text, hasFiles);
+      let intent = detectIntent(text, hasFiles);
+      let llmDomain: string | null = null;
+      try {
+        const r = await classifyIntent(text, hasFiles || !!contractText, !!auditResult);
+        if (r.intent) { intent = r.intent; llmDomain = r.domain; }
+      } catch { /* offline or classifier error — keyword fallback already applied */ }
+      const agentsList = routeMode === "manual" && selectedAgents.length ? selectedAgents : undefined;
+      const collectedSteps: StepEvent[] = [];
 
       if (intent === "audit" && hasFiles) {
-        const results: AuditResult[] = [];
         for (const f of enrichedFiles) {
           if (f.text) setContractText(f.text);
-          const result = await auditContract(
-            f.file, routeMode,
-            routeMode === "manual" && selectedAgents.length ? selectedAgents : undefined,
-          );
-          results.push(result);
-          setAuditResult(result);
+          let gotResponse = false;
+          await auditContractStream(f.file, routeMode, agentsList, lang, {
+            onStep: (step) => { collectedSteps.push(step); setLiveSteps([...collectedSteps]); },
+            onDone: (result) => { gotResponse = true; handleStreamResult(result, enrichedFiles, collectedSteps); },
+            onError: (err) => { gotResponse = true; addMessage("assistant", friendlyError(err)); },
+          });
+          if (!gotResponse) {
+            addMessage("assistant", "No response received from the server.");
+          }
         }
-        const merged = mergeAuditResults(results);
-        const totalFlags = Object.values(merged.flags_by_domain).reduce((s, f) => s + f.length, 0);
-        const art: Artifact = {
-          type: "audit", title: `Audit Report — ${totalFlags} flags`,
-          data: merged, contractText: contractText || enrichedFiles[0]?.text,
-        };
-        setArtifact(art);
-        addMessage("assistant", merged.summary, undefined, art);
-      } else if (intent === "revise") {
-        const domain = selectedAgents[0] || Object.keys(auditResult?.flags_by_domain || {})[0] || "civil";
+      } else if (intent === "revise" && (contractText || enrichedFiles[0]?.text)) {
+        const domain = selectedAgents[0] || llmDomain || Object.keys(auditResult?.flags_by_domain || {})[0] || detectDomain(text + " " + (contractText || "").slice(0, 500));
         const ct = contractText || enrichedFiles[0]?.text || "";
-        const result = await reviseContract(ct, domain);
-        const art: Artifact = { type: "revision", title: "Revised Contract", data: result, contractText: ct };
+        const result = await reviseContract(ct, domain, undefined, lang);
+        const art: Artifact = { type: "revision", title: s.revised, data: result, contractText: ct };
         setArtifact(art);
         addMessage("assistant", result.summary, undefined, art);
       } else if (intent === "draft") {
-        const domain = selectedAgents[0] || "civil";
+        const domain = selectedAgents[0] || llmDomain || detectDomain(text);
         const contractType = extractContractType(text);
-        const result = await draftContract(contractType, domain, text);
-        const art: Artifact = { type: "draft", title: `Draft: ${contractType}`, data: result };
+        const result = await draftContract(contractType, domain, text, lang);
+        const art: Artifact = { type: "draft", title: `${s.draftContract}: ${contractType}`, data: result };
         setArtifact(art);
         addMessage("assistant", result.summary, undefined, art);
       } else {
-        const ct = contractText || enrichedFiles.map((f) => f.text).filter(Boolean).join("\n\n") || "";
+        const fileTexts = enrichedFiles.map((f) => f.text).filter(Boolean).join("\n\n");
+        const ct = contractText || fileTexts || "";
         if (ct && !contractText) setContractText(ct);
-        const result = await chatWithParalegal(
-          text, ct || undefined, routeMode,
-          routeMode === "manual" && selectedAgents.length ? selectedAgents : undefined,
-        );
-        const hasFlags = Object.values(result.flags_by_domain || {}).some((f) => f.length > 0);
-        const art: Artifact | null = hasFlags
-          ? { type: "audit", title: "Legal Analysis", data: result, contractText: ct }
-          : null;
-        if (art) setArtifact(art);
-        addMessage("assistant", result.summary, undefined, art);
+        const history = messages.slice(-8).map((m) => ({ role: m.role, content: m.content.slice(0, 1500) }));
+        if (auditResult) {
+          const flagDigest = Object.entries(auditResult.flags_by_domain || {})
+            .flatMap(([domain, flags]) => flags.map((f) => `[${domain}/${f.severity}] ${f.label} (${f.article_ref}): ${f.rationale}`))
+            .join("\n");
+          if (flagDigest) history.unshift({ role: "assistant", content: `Previous audit findings:\n${flagDigest}`.slice(0, 3000) });
+        }
+        let gotResponse = false;
+        await chatWithParalegalStream(text, ct || undefined, routeMode, agentsList, lang, {
+          onStep: (step) => { collectedSteps.push(step); setLiveSteps([...collectedSteps]); },
+          onDone: (result) => {
+            gotResponse = true;
+            const totalFlags = Object.values(result.flags_by_domain || {}).reduce((sum, f) => sum + f.length, 0);
+            if (totalFlags > 0) {
+              handleStreamResult(result, enrichedFiles, collectedSteps);
+            } else {
+              addMessage("assistant", result.summary || "No response.", undefined, undefined, collectedSteps);
+            }
+          },
+          onError: (err) => { gotResponse = true; addMessage("assistant", friendlyError(err)); },
+        }, history);
+        if (!gotResponse) {
+          addMessage("assistant", "No response received from the server.");
+        }
       }
     } catch (err: any) {
-      addMessage("assistant", `${s.errorPrefix} ${err.message}`);
+      addMessage("assistant", friendlyError(err.message || ""));
     } finally {
       setLoading(false);
+      setLiveSteps([]);
     }
   };
 
@@ -134,9 +254,20 @@ export default function App() {
   return (
     <AppCtx.Provider value={{ lang, theme, s }}>
       <div className="h-screen w-full flex" style={{ background: "var(--bg)" }}>
-        {/* Main chat area */}
+        <HistorySidebar
+          conversations={conversations}
+          activeId={activeConvoId}
+          open={sidebarOpen}
+          onToggle={() => setSidebarOpen(!sidebarOpen)}
+          onSelect={loadConversation}
+          onDelete={deleteConversation}
+          onNewChat={startNewChat}
+          onClearAll={clearAllConversations}
+        />
+
         <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300`}>
-          <TopBar lang={lang} theme={theme} onLangChange={setLang} onThemeChange={setTheme} />
+          <TopBar lang={lang} theme={theme} onLangChange={setLang} onThemeChange={setTheme}
+            onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} onNewChat={startNewChat} />
 
           <div className="flex-1 flex flex-col min-h-0">
             {!hasMessages ? (
@@ -155,7 +286,7 @@ export default function App() {
             ) : (
               <>
                 <div className="flex-1 w-full overflow-y-auto scrollbar-thin">
-                  <MessageList messages={messages} loading={loading} onArtifactClick={setArtifact} />
+                  <MessageList messages={messages} loading={loading} steps={liveSteps} onArtifactClick={setArtifact} />
                 </div>
                 <div className="px-4 pb-4 shrink-0" style={{ width: "100%", maxWidth: "48rem", margin: "0 auto" }}>
                   <ChatInput onSend={handleSend} loading={loading} files={uploadedFiles} onFilesChange={setUploadedFiles}
@@ -173,15 +304,23 @@ export default function App() {
   );
 }
 
+function detectDomain(text: string): string {
+  const lower = text.toLowerCase();
+  if (/employ|labou?r|salary|wage|worker|dismiss|عمل|موظف|أجر|عامل|فصل/.test(lower)) return "labour";
+  if (/commercial|company|trade|partnership|تجاري|شركة|تجارة/.test(lower)) return "commercial";
+  return "civil";
+}
+
 function detectIntent(text: string, hasFiles: boolean): "audit" | "revise" | "draft" | "chat" {
   const lower = text.toLowerCase();
-  if (hasFiles && (lower.includes("audit") || lower.includes("review") || lower.includes("check") || lower.includes("analyze") || lower.includes("scan") || !text.trim()))
-    return "audit";
-  if (lower.includes("revise") || lower.includes("fix") || lower.includes("rewrite") || lower.includes("correct"))
-    return "revise";
-  if (lower.includes("draft") || lower.includes("create") || lower.includes("generate") || lower.includes("write a contract"))
-    return "draft";
-  if (hasFiles) return "audit";
+  const auditWords = ["audit", "review", "check", "analyze", "scan", "فحص", "مراجعة", "تحليل"];
+  const reviseWords = ["revise", "fix", "rewrite", "correct", "changes", "amend", "adjust", "enhance", "improve", "modify", "update", "apply the", "تعديل", "إصلاح", "تصحيح", "التغييرات", "تحسين", "حسّن", "عدّل"];
+  const draftWords = ["draft", "create", "generate", "write a contract", "صياغة", "إنشاء"];
+
+  if (auditWords.some((w) => lower.includes(w))) return "audit";
+  if (reviseWords.some((w) => lower.includes(w))) return "revise";
+  if (draftWords.some((w) => lower.includes(w))) return "draft";
+  if (hasFiles && !text.trim()) return "audit";
   return "chat";
 }
 

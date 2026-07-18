@@ -153,8 +153,12 @@ autonomously choosing whether and which domain specialists to consult.
 Registry: {registry_json}
 Use classify as a routing hint in auto mode when useful. Specialists are the \
 only source of legal findings; do not invent facts, citations, or specialist \
-conclusions. You may consult a second specialist when justified. Synthesize \
-consulted results, state any unavailable specialist, then call finish."""
+conclusions. Consult EVERY domain the contract plausibly implicates — e.g. a \
+partnership contract that also sets employment terms (salary, working hours, \
+dismissal, duties of a manager/employee) requires BOTH commercial AND labour \
+specialists. You may issue several consult_specialist calls at once; they run \
+in parallel. Synthesize consulted results, state any unavailable specialist, \
+then call finish."""
 
 
 ORCHESTRATOR_USER = """\
@@ -186,7 +190,8 @@ Output strict JSON with this schema:
   "flags_by_domain": {
     "domain_name": [
       {
-        "severity": "HIGH|MEDIUM|LOW",
+        "severity": "high|medium|low (lowercase only)",
+        "label": "short title of the issue (3-8 words, same language as the memo)",
         "evidence_span": "exact contract quote",
         "article_ref": "article number",
         "article_ar": "Arabic text",

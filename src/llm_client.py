@@ -38,12 +38,12 @@ class Settings:
     # Models
     llm_model: str = field(
         default_factory=lambda: os.environ.get(
-            "LLM_MODEL", "anthropic/claude-sonnet-4-5"
+            "LLM_MODEL", "google/gemini-2.5-flash-lite"
         )
     )
     classifier_model: str = field(
         default_factory=lambda: os.environ.get(
-            "CLASSIFIER_MODEL", "google/gemini-2.5-flash"
+            "CLASSIFIER_MODEL", "google/gemini-2.5-flash-lite"
         )
     )
     embedding_model: str = field(
@@ -94,16 +94,52 @@ def _build_client() -> OpenAI:
 
 
 _client: OpenAI | None = None
+_client_key: str = ""
 
 
 def get_client() -> OpenAI:
-    global _client
-    if _client is None:
+    global _client, _client_key
+    if _client is None or _client_key != settings.api_key:
+        load_dotenv(override=True)
+        settings.api_key = os.environ.get("OPENROUTER_API_KEY", settings.api_key)
+        settings.llm_model = os.environ.get("LLM_MODEL", settings.llm_model)
+        settings.classifier_model = os.environ.get("CLASSIFIER_MODEL", settings.classifier_model)
+        settings.agent_max_steps = int(os.environ.get("AGENT_MAX_STEPS", settings.agent_max_steps))
         _client = _build_client()
+        _client_key = settings.api_key
     return _client
 
 
 # ── Chat completions ──────────────────────────────────────────────────────────
+
+def create_completion(**kwargs: Any):
+    """Chat-completion call with retry on free-tier per-minute rate limits.
+
+    OpenRouter free models allow 16 requests/min; parallel agent loops burst
+    past that, so back off and retry instead of failing the whole request.
+    """
+    import time
+    from openai import APIConnectionError, RateLimitError
+
+    client = get_client()
+    delays = [15, 20, 30]
+    for attempt, delay in enumerate([*delays, None]):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except RateLimitError as exc:
+            body = getattr(exc, "body", None) or {}
+            msg = str(body.get("error", {}).get("message", "")) if isinstance(body, dict) else str(exc)
+            if "per-min" not in msg and "free-models" not in msg:
+                raise  # daily quota / credit limit — retrying won't help
+            if delay is None:
+                raise
+            print(f"[llm_client] free-tier rate limit hit (attempt {attempt + 1}), sleeping {delay}s...")
+            time.sleep(delay)
+        except APIConnectionError:
+            if delay is None:
+                raise
+            time.sleep(5)
+
 
 def chat(
     messages: list[dict[str, str]],
@@ -130,8 +166,7 @@ def chat(
     """
     from src.cost_tracker import tracker
 
-    client = get_client()
-    resp = client.chat.completions.create(
+    resp = create_completion(
         model=model or settings.llm_model,
         messages=messages,
         temperature=temperature,

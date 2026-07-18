@@ -16,27 +16,27 @@ export default function Suggestions({ hasFiles, hasContract, hasAudit, onSelect 
 
   if (hasFiles) {
     suggestions = [
-      { icon: FileSearch, label: s.suggestAuditRisks, text: "Audit this contract for compliance risks under Egyptian law" },
-      { icon: Scale, label: s.suggestCheckClauses, text: "Review the termination and penalty clauses for legal compliance" },
-      { icon: MessageSquare, label: s.suggestSummarize, text: "Summarize the key obligations and rights in this contract" },
+      { icon: FileSearch, label: s.suggestAuditRisks, text: s.suggestAuditRisksText },
+      { icon: Scale, label: s.suggestCheckClauses, text: s.suggestCheckClausesText },
+      { icon: MessageSquare, label: s.suggestSummarize, text: s.suggestSummarizeText },
     ];
   } else if (hasAudit) {
     suggestions = [
-      { icon: RefreshCw, label: s.suggestRevise, text: "Revise all flagged clauses to comply with the cited articles" },
-      { icon: MessageSquare, label: s.suggestExplain, text: "Explain why the penalty clause was flagged and what the law requires" },
-      { icon: PenTool, label: s.suggestDraftReplacement, text: "Draft a compliant version of the flagged clauses" },
+      { icon: RefreshCw, label: s.suggestRevise, text: s.suggestReviseText },
+      { icon: MessageSquare, label: s.suggestExplain, text: s.suggestExplainText },
+      { icon: PenTool, label: s.suggestDraftReplacement, text: s.suggestDraftReplacementText },
     ];
   } else if (hasContract) {
     suggestions = [
-      { icon: FileSearch, label: s.suggestAuditContract, text: "Audit this contract for compliance risks under Egyptian law" },
-      { icon: MessageSquare, label: s.suggestAskClause, text: "Is the termination clause in this contract enforceable?" },
-      { icon: RefreshCw, label: s.suggestReviseCompliance, text: "Revise any non-compliant clauses to meet Egyptian Civil Code requirements" },
+      { icon: FileSearch, label: s.suggestAuditContract, text: s.suggestAuditContractText },
+      { icon: MessageSquare, label: s.suggestAskClause, text: s.suggestAskClauseText },
+      { icon: RefreshCw, label: s.suggestReviseCompliance, text: s.suggestReviseComplianceText },
     ];
   } else {
     suggestions = [
-      { icon: Upload, label: s.suggestUpload, text: "Upload a contract to audit for legal risks" },
-      { icon: PenTool, label: s.suggestDraft, text: "Draft an employment contract compliant with Egyptian labour law" },
-      { icon: MessageSquare, label: s.suggestAsk, text: "What are the requirements for a valid contract under Egyptian Civil Code?" },
+      { icon: Upload, label: s.suggestUpload, text: s.suggestUploadText },
+      { icon: PenTool, label: s.suggestDraft, text: s.suggestDraftText },
+      { icon: MessageSquare, label: s.suggestAsk, text: s.suggestAskText },
     ];
   }
 
