@@ -124,15 +124,16 @@ def build_domain(domain: str, *, force_rebuild: bool = False) -> None:
         if domain == "civil":
             articles = load_tawasul(domain="civil")
         elif domain == "labour":
-            articles = load_dataflare(domain="labour")
+            # Labour Law 12/2003 (dataflare) is REPEALED by 14/2025 — statute
+            # spine is the official gazette PDF; tarekys5 Q&A fills explanations.
             from src.corpus_loader import load_official_labour_pdf, load_tarekys5_as_articles
-            
-            pdf_path = Path("data/law_14_2025.pdf")
-            official_articles = load_official_labour_pdf(pdf_path)
-            articles.extend(official_articles)
-            
-            tarekys_articles = load_tarekys5_as_articles(domain="labour")
-            articles.extend(tarekys_articles)
+
+            pdf_path = Path("data/corpus/labour/labour_law_14_2025.pdf")
+            articles = load_official_labour_pdf(pdf_path)
+            official_numbers = {a["number"] for a in articles}
+            articles.extend(
+                load_tarekys5_as_articles(domain="labour", exclude_numbers=official_numbers)
+            )
         elif domain == "commercial":
             articles = load_dataflare(domain="commercial")
             from src.corpus_loader import load_tarekys5_as_articles

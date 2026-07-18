@@ -153,10 +153,10 @@ def chat(request: ChatRequest) -> dict[str, Any]:
     )
 
 
-def _sse_stream(kwargs: dict[str, Any]):
+def _sse_from_events(events):
     def generate():
         try:
-            for event_type, data in ParalegalOrchestrator().run_streaming(**kwargs):
+            for event_type, data in events:
                 yield f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
         except Exception as exc:
             msg = str(exc)
@@ -170,6 +170,10 @@ def _sse_stream(kwargs: dict[str, Any]):
                 error = msg
             yield f"event: error\ndata: {json.dumps({'detail': error}, ensure_ascii=False)}\n\n"
     return StreamingResponse(generate(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+
+def _sse_stream(kwargs: dict[str, Any]):
+    return _sse_from_events(ParalegalOrchestrator().run_streaming(**kwargs))
 
 
 @app.post("/audit/stream")
@@ -251,6 +255,28 @@ def draft(request: DraftRequest) -> dict[str, Any]:
         raise
 
 
+@app.post("/revise/stream")
+def revise_stream(request: ReviseRequest):
+    agent = get_agent(request.domain)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"Unknown domain '{request.domain}'.")
+    fn = getattr(agent, "revise_stream", None)
+    if fn is None:
+        raise HTTPException(status_code=501, detail=f"The {request.domain} specialist does not support revise yet.")
+    return _sse_from_events(fn(request.contract_text, request.flag_ids, lang=request.lang))
+
+
+@app.post("/draft/stream")
+def draft_stream(request: DraftRequest):
+    agent = get_agent(request.domain)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"Unknown domain '{request.domain}'.")
+    fn = getattr(agent, "draft_stream", None)
+    if fn is None:
+        raise HTTPException(status_code=501, detail=f"The {request.domain} specialist does not support draft yet.")
+    return _sse_from_events(fn(request.contract_type, request.requirements or "", lang=request.lang))
+
+
 @app.get("/cost")
 def cost_summary() -> dict[str, Any]:
     return tracker.summary()
@@ -297,6 +323,10 @@ def classify_intent(request: IntentRequest) -> dict[str, Any]:
         domain = parsed.get("domain")
         if intent not in {"audit", "revise", "draft", "chat"}:
             intent = None
+        # Hard gate: audit/revise are impossible without a contract — the prompt
+        # rule alone is not reliably followed by the model, so enforce it here.
+        if intent in {"audit", "revise"} and not request.has_contract:
+            intent = "chat"
         if domain not in {"civil", "commercial", "labour"}:
             domain = None
         return {"intent": intent, "domain": domain}
@@ -374,38 +404,76 @@ async def highlight_pdf(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not open PDF: {exc}") from exc
 
+    severity_rank = {"high": 3, "medium": 2, "low": 1}
+
+    def _rank(item: dict) -> int:
+        return severity_rank.get(str(item.get("severity") or "medium").lower(), 2)
+
+    # Process higher severities first so an overlapping region keeps the
+    # highest severity's color; lower-severity overlaps only add their badge.
+    ordered = sorted(enumerate(items), key=lambda pair: -_rank(pair[1]))
+
+    # page index -> [{rect, severity, numbers}] for overlap detection + badges
+    placed: dict[int, list[dict]] = {}
     total = 0
-    for item in items:
+    for orig_i, item in ordered:
         span = (item.get("evidence_span") or "").strip()
         if not span:
             continue
-        color = _SEVERITY_COLORS.get(str(item.get("severity") or "medium").lower(), _SEVERITY_COLORS["medium"])
+        sev = str(item.get("severity") or "medium").lower()
+        color = _SEVERITY_COLORS.get(sev, _SEVERITY_COLORS["medium"])
+        breach_no = int(item.get("index") or orig_i + 1)
         words = span.split()
         needles = [span]
         for n in (10, 6, 4):
             if len(words) > n:
                 needles.append(" ".join(words[:n]))
-        for page in doc:
+        for pno, page in enumerate(doc):
             quads = []
             for needle in needles:
                 quads = page.search_for(needle, quads=True)
                 if quads:
                     break
-            if not quads:
-                # exact search failed (ligatures / presentation forms) — fuzzy word match
-                rects = _find_span_rects(page, span)
-                if rects:
-                    annot = page.add_highlight_annot(rects)
-                    annot.set_colors(stroke=color)
-                    annot.update()
-                    total += 1
-                    break
+            rects = [pymupdf.Rect(q.rect) for q in quads] if quads else _find_span_rects(page, span)
+            if not rects:
                 continue
-            annot = page.add_highlight_annot(quads)
+            union = pymupdf.Rect(rects[0])
+            for r in rects[1:]:
+                union |= r
+            entries = placed.setdefault(pno, [])
+            overlap = next((e for e in entries if e["rect"].intersects(union)), None)
+            if overlap is not None:
+                # already highlighted by an equal-or-higher severity — add badge only
+                overlap["numbers"].append(breach_no)
+                total += 1
+                break
+            annot = page.add_highlight_annot(quads or rects)
             annot.set_colors(stroke=color)
+            annot.set_opacity(0.55)  # default highlight opacity is too faint
             annot.update()
+            entries.append({"rect": union, "severity": sev, "numbers": [breach_no]})
             total += 1
             break
+
+    # Numbered badges: a colored disc with the breach number beside each highlight
+    # (right edge — Arabic text is RTL so this sits at the line start).
+    for pno, entries in placed.items():
+        page = doc[pno]
+        for e in entries:
+            color = _SEVERITY_COLORS.get(e["severity"], _SEVERITY_COLORS["medium"])
+            rect = e["rect"]
+            for k, num in enumerate(sorted(e["numbers"])):
+                cx = min(rect.x1 + 10 + k * 18, page.rect.x1 - 9)
+                cy = max(rect.y0 + 7, 9)
+                center = pymupdf.Point(cx, cy)
+                page.draw_circle(center, 8, color=color, fill=color)
+                label = str(num)
+                page.insert_text(
+                    pymupdf.Point(cx - (2.5 * len(label)), cy + 3.2),
+                    label,
+                    fontsize=9,
+                    color=(1, 1, 1),
+                )
 
     out = doc.tobytes()
     doc.close()
@@ -413,6 +481,64 @@ async def highlight_pdf(
         content=out,
         media_type="application/pdf",
         headers={"X-Highlight-Count": str(total)},
+    )
+
+
+@app.post("/apply-revisions")
+def apply_revisions(payload: dict[str, Any]) -> Response:
+    """Apply accepted revisions to the contract text and return a print-ready PDF."""
+    import pymupdf
+
+    contract_text = str(payload.get("contract_text") or "")
+    revisions = payload.get("revisions") or []
+    if not contract_text.strip():
+        raise HTTPException(status_code=400, detail="contract_text is required.")
+
+    revised = contract_text
+    applied = 0
+    for rev in revisions:
+        orig = str(rev.get("clause_original") or "")
+        new = str(rev.get("clause_revised") or "")
+        if orig and new and orig in revised:
+            revised = revised.replace(orig, new, 1)
+            applied += 1
+
+    import html as html_mod
+    import re as re_mod
+
+    is_arabic = any("؀" <= ch <= "ۿ" for ch in revised[:400])
+
+    def _para(p: str) -> str:
+        escaped = html_mod.escape(p.strip())
+        # models emit markdown bold — render it instead of printing the asterisks
+        return "<p>" + re_mod.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped) + "</p>"
+
+    paragraphs = "".join(_para(p) for p in revised.split("\n") if p.strip())
+    html = (
+        f'<div dir="{"rtl" if is_arabic else "ltr"}" '
+        f'style="font-size:11pt; line-height:1.9;">{paragraphs}</div>'
+    )
+
+    import io
+
+    # Story paginates and shapes Arabic (bidi) via MuPDF's HTML engine
+    buffer = io.BytesIO()
+    story = pymupdf.Story(html=html)
+    writer = pymupdf.DocumentWriter(buffer)
+    rect = pymupdf.paper_rect("a4")
+    margin = pymupdf.Rect(rect.x0 + 50, rect.y0 + 56, rect.x1 - 50, rect.y1 - 56)
+    more = 1
+    while more:
+        device = writer.begin_page(rect)
+        more, _ = story.place(margin)
+        story.draw(device)
+        writer.end_page()
+    writer.close()
+    out = buffer.getvalue()
+    return Response(
+        content=out,
+        media_type="application/pdf",
+        headers={"X-Applied-Count": str(applied)},
     )
 
 

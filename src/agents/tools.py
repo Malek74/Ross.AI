@@ -21,6 +21,7 @@ class DomainTools:
     drafts: list[dict[str, Any]] = field(default_factory=list)
     finished_summary: str | None = None
     _retriever: GraphExpandedRetriever | None = field(default=None, init=False, repr=False)
+    _get_article_calls: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._retriever = GraphExpandedRetriever(self.index)
@@ -143,6 +144,15 @@ class DomainTools:
         return {"results": [self._public_article(article) for article in results]}
 
     def get_article(self, number: str) -> dict[str, Any]:
+        # Hard rail: weak models sometimes crawl the corpus article-by-article
+        # instead of acting; cap lookups so the loop budget goes to real work.
+        self._get_article_calls += 1
+        if self._get_article_calls > 20:
+            return {
+                "found": False,
+                "number": number,
+                "note": "Article-lookup budget exhausted. Use what you have retrieved and proceed with the task (flag_risk / revise_clause / draft_clause / finish).",
+            }
         article = self.index.get_article(number)
         if article is None:
             return {"found": False, "number": number}
@@ -175,8 +185,8 @@ class DomainTools:
         if not validate_article_ref(article_ref, self.index):
             return {"accepted": False, "reason": "Article does not exist in this specialist's corpus."}
         revision = {
-            "original_clause": original_clause,
-            "revised_clause": revised_clause,
+            "clause_original": original_clause,
+            "clause_revised": revised_clause,
             "article_ref": article_ref,
             "rationale": rationale,
             "quote_match": {"start": match.start, "end": match.end, "similarity": match.similarity},
@@ -189,7 +199,7 @@ class DomainTools:
             return {"accepted": False, "reason": "Article does not exist in this specialist's corpus."}
         draft = {
             "topic": topic,
-            "clause_text": clause_text,
+            "text": clause_text,
             "article_ref": article_ref,
             "rationale": rationale,
         }

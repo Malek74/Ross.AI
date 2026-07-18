@@ -129,7 +129,13 @@ def create_completion(**kwargs: Any):
         except RateLimitError as exc:
             body = getattr(exc, "body", None) or {}
             msg = str(body.get("error", {}).get("message", "")) if isinstance(body, dict) else str(exc)
-            if "per-min" not in msg and "free-models" not in msg:
+            retryable = (
+                "per-min" in msg
+                or "free-models" in msg
+                or "temporarily rate-limited" in msg
+                or "retry shortly" in msg
+            )
+            if not retryable:
                 raise  # daily quota / credit limit — retrying won't help
             if delay is None:
                 raise

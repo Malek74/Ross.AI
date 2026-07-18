@@ -76,18 +76,54 @@ class DomainAgent:
 
     def draft(self, contract_type: str, requirements: str = "", lang: str = "en") -> dict[str, Any]:
         """Draft a new contract grounded in this domain's statute corpus."""
-        prompt = f"Draft a {contract_type} contract compliant with Egyptian {self.name} law."
-        if requirements:
-            prompt += f" Requirements: {requirements}"
-        return self._agent_loop(
-            goal=prompt,
-            contract="",
-            question=prompt,
-            mode="draft",
+        return self._agent_loop(**self._draft_kwargs(contract_type, requirements, lang))
+
+    def revise_stream(self, contract: str, flag_ids: list[str] | None = None, lang: str = "en"):
+        """Streaming variant of revise(): yields ("step", info) events, then ("done", result)."""
+        return self._agent_loop_events(
+            goal=f"Revise the flagged clauses in this contract to comply with {self.name} law. Preserve the original intent. Use revise_clause for each fix, citing the governing article.",
+            contract=contract,
+            question=None,
+            mode="revise",
             lang=lang,
         )
 
-    def _agent_loop(
+    def draft_stream(self, contract_type: str, requirements: str = "", lang: str = "en"):
+        """Streaming variant of draft(): yields ("step", info) events, then ("done", result)."""
+        return self._agent_loop_events(**self._draft_kwargs(contract_type, requirements, lang))
+
+    def _draft_kwargs(self, contract_type: str, requirements: str, lang: str) -> dict[str, Any]:
+        prompt = f"Draft a {contract_type} contract compliant with Egyptian {self.name} law."
+        if requirements:
+            prompt += f" Requirements: {requirements}"
+        return {"goal": prompt, "contract": "", "question": prompt, "mode": "draft", "lang": lang}
+
+    def _agent_loop(self, **kwargs: Any) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for event, data in self._agent_loop_events(**kwargs):
+            if event == "done":
+                result = data
+        return result
+
+    @staticmethod
+    def _describe_tool(name: str, args: dict[str, Any]) -> dict[str, str]:
+        if name == "search_statutes":
+            return {"action": "search", "detail": f"Searching statutes: {str(args.get('query', ''))[:80]}"}
+        if name == "get_article":
+            return {"action": "article", "detail": f"Fetching article {args.get('number', '')}"}
+        if name == "flag_risk":
+            return {"action": "flag", "detail": "Recording a validated risk flag..."}
+        if name == "revise_clause":
+            return {"action": "revise", "detail": "Rewriting a clause to comply..."}
+        if name == "draft_clause":
+            return {"action": "draft", "detail": f"Drafting clause: {str(args.get('topic', ''))[:60]}"}
+        if name == "validate_draft":
+            return {"action": "validate", "detail": "Self-auditing drafted clause..."}
+        if name == "finish":
+            return {"action": "finish", "detail": "Finalizing..."}
+        return {"action": name, "detail": f"Running {name}..."}
+
+    def _agent_loop_events(
         self,
         *,
         goal: str,
@@ -95,7 +131,7 @@ class DomainAgent:
         question: str | None,
         mode: Literal["audit", "chat", "revise", "draft"],
         lang: str = "en",
-    ) -> dict[str, Any]:
+    ):
         index = self._load_index()
         tools = DomainTools(index=index, contract=contract)
         rubric = self._load_playbook()
@@ -109,7 +145,9 @@ class DomainAgent:
         for step in range(settings.agent_max_steps):
             response = create_completion(
                 model=settings.llm_model, messages=messages, tools=tools.definitions(mode=mode),
-                tool_choice="auto", temperature=0.0, max_tokens=2048, extra_body=settings.extra_body,
+                tool_choice="auto", temperature=0.0,
+                max_tokens=8192 if mode in ("draft", "revise") else 2048,
+                extra_body=settings.extra_body,
             )
             tracker.record(response, endpoint=f"specialist:{self.name}")
             message = response.choices[0].message
@@ -123,8 +161,12 @@ class DomainAgent:
                 try:
                     arguments = json.loads(call.function.arguments or "{}")
                 except json.JSONDecodeError:
+                    arguments = {}
                     result = {"error": "Tool arguments were not valid JSON."}
                 else:
+                    result = None
+                yield ("step", self._describe_tool(call.function.name, arguments))
+                if result is None:
                     result = tools.call(call.function.name, arguments)
                 trace.append({"step": step + 1, "tool": call.function.name, "result": result})
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": json.dumps(result, ensure_ascii=False)})
@@ -143,7 +185,46 @@ class DomainAgent:
             result["revisions"] = tools.revisions
         if tools.drafts:
             result["drafts"] = tools.drafts
-        return result
+            if mode == "draft":
+                result["document"] = self._assemble_document(tools.drafts, lang)
+        elif mode == "draft" and final_text and tools.finished_summary is None:
+            # Weak-model fallback: the model wrote the contract as plain text
+            # instead of recording clauses through draft_clause. Ship the text
+            # as the document, but mark it as lacking validated citations.
+            document = final_text.strip()
+            first, _, rest = document.partition("\n")
+            if rest and ("سأقوم" in first or first.lower().startswith(("sure", "certainly", "بالتأكيد"))):
+                document = rest.strip()
+            result["document"] = document
+            result["warnings"] = ["draft_not_grounded: clauses were not recorded via draft_clause, citations unvalidated"]
+        if mode == "draft" and result.get("document") and tools.finished_summary is None:
+            # Don't surface mid-loop narration in the chat bubble — the document
+            # itself is the deliverable.
+            result["summary"] = (
+                "تمت صياغة مسودة العقد — راجع المستند في تبويب العقد والبنود المستند إليها في التقرير."
+                if lang == "ar"
+                else "Contract draft completed — see the document in the Contract tab and the cited clauses in the Report."
+            )
+        yield ("done", result)
+
+    @staticmethod
+    def _assemble_document(drafts: list[dict[str, Any]], lang: str) -> str:
+        """Join drafted clauses into one contract document, in document order."""
+        skip_numbering = {"التمهيد", "التوقيعات", "preamble", "signatures", "title", "العنوان"}
+        parts: list[str] = []
+        clause_no = 0
+        for d in drafts:
+            topic = str(d.get("topic") or "").strip()
+            text = str(d.get("text") or "").strip()
+            if not text:
+                continue
+            if topic and topic.strip().lower() not in skip_numbering:
+                clause_no += 1
+                label = f"البند {clause_no}: {topic}" if lang == "ar" else f"Clause {clause_no}: {topic}"
+                parts.append(f"{label}\n{text}")
+            else:
+                parts.append(text)
+        return "\n\n".join(parts)
 
     def _load_index(self) -> DomainIndex:
         root = self.index_path if self.index_path.is_absolute() else _ROOT / self.index_path

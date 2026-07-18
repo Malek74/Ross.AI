@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { fetchAgents, auditContractStream, chatWithParalegalStream, reviseContract, draftContract, extractText, classifyIntent } from "./api/client";
+import { fetchAgents, auditContractStream, chatWithParalegalStream, reviseContractStream, draftContractStream, extractText, classifyIntent } from "./api/client";
 import type { AgentInfo, AuditResult, ChatMessage, FileAttachment, Artifact, Conversation, StepEvent } from "./api/types";
 import type { Lang } from "./i18n";
 import { t, isRtl } from "./i18n";
@@ -198,17 +198,39 @@ export default function App() {
       } else if (intent === "revise" && (contractText || enrichedFiles[0]?.text)) {
         const domain = selectedAgents[0] || llmDomain || Object.keys(auditResult?.flags_by_domain || {})[0] || detectDomain(text + " " + (contractText || "").slice(0, 500));
         const ct = contractText || enrichedFiles[0]?.text || "";
-        const result = await reviseContract(ct, domain, undefined, lang);
-        const art: Artifact = { type: "revision", title: s.revised, data: result, contractText: ct };
-        setArtifact(art);
-        addMessage("assistant", result.summary, undefined, art);
+        await reviseContractStream(ct, domain, undefined, lang, {
+          onStep: (step) => { collectedSteps.push(step); setLiveSteps([...collectedSteps]); },
+          onDone: (result) => {
+            const art: Artifact = { type: "revision", title: s.revised, data: result, contractText: ct };
+            setArtifact(art);
+            // Keep the revised contract as the session context so follow-up
+            // questions and further revisions operate on the updated text.
+            let revised = ct;
+            for (const rev of result.revisions || []) {
+              if (rev.clause_original && rev.clause_revised && revised.includes(rev.clause_original)) {
+                revised = revised.replace(rev.clause_original, rev.clause_revised);
+              }
+            }
+            if (revised !== ct) setContractText(revised);
+            addMessage("assistant", result.summary, undefined, art, collectedSteps);
+          },
+          onError: (err) => addMessage("assistant", friendlyError(err)),
+        });
       } else if (intent === "draft") {
         const domain = selectedAgents[0] || llmDomain || detectDomain(text);
         const contractType = extractContractType(text);
-        const result = await draftContract(contractType, domain, text, lang);
-        const art: Artifact = { type: "draft", title: `${s.draftContract}: ${contractType}`, data: result };
-        setArtifact(art);
-        addMessage("assistant", result.summary, undefined, art);
+        await draftContractStream(contractType, domain, text, lang, {
+          onStep: (step) => { collectedSteps.push(step); setLiveSteps([...collectedSteps]); },
+          onDone: (result) => {
+            const art: Artifact = { type: "draft", title: `${s.draftContract}: ${contractType}`, data: result };
+            setArtifact(art);
+            // The drafted contract becomes the session contract so the user can
+            // ask follow-ups about it, audit it, or revise it next.
+            if (result.document) setContractText(result.document);
+            addMessage("assistant", result.summary, undefined, art, collectedSteps);
+          },
+          onError: (err) => addMessage("assistant", friendlyError(err)),
+        });
       } else {
         const fileTexts = enrichedFiles.map((f) => f.text).filter(Boolean).join("\n\n");
         const ct = contractText || fileTexts || "";
@@ -327,6 +349,10 @@ function detectIntent(text: string, hasFiles: boolean): "audit" | "revise" | "dr
 function extractContractType(text: string): string {
   const patterns = [/draft\s+(?:a\s+)?(\w+(?:\s+\w+)?)\s+contract/i, /create\s+(?:a\s+)?(\w+(?:\s+\w+)?)\s+contract/i, /(\w+)\s+contract/i];
   for (const p of patterns) { const m = text.match(p); if (m) return m[1]; }
+  // Arabic: «عقد بيع سيارة», «صياغة عقد ايجار …» → keep the phrase after عقد
+  const ar = text.match(/عقد\s+((?:[؀-ۿ]+\s*){1,4})/);
+  if (ar) return `عقد ${ar[1].trim()}`;
+  if (/[؀-ۿ]/.test(text)) return text.trim().slice(0, 50);
   return "general";
 }
 

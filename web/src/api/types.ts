@@ -87,6 +87,8 @@ export interface DraftResult {
   summary: string;
   drafts: DraftClause[];
   status: string;
+  document?: string;
+  warnings?: string[];
 }
 
 export interface CostSummary {

@@ -140,7 +140,18 @@ Preserve commercial intent while ensuring legal compliance."""
 SPECIALIST_USER_DRAFT = """\
 {question}
 
-Draft this contract with clauses grounded in {domain_label} articles."""
+Draft a COMPLETE, ready-to-sign contract in the response language, not just a list of clauses:
+1. Start with the contract title and a preamble paragraph (التمهيد) introducing the parties \
+(use placeholders like الطرف الأول: السيد/ .................... for names) and the date.
+2. Record EVERY part of the document through draft_clause — including the preamble \
+(topic: "التمهيد" / "Preamble") and the closing/signatures block (topic: "التوقيعات" / "Signatures") \
+— each as a full, formal contract paragraph, in document order.
+3. Ground every substantive clause in a retrieved {domain_label} article (search first, then cite it \
+as article_ref). For the preamble/signature blocks, cite the article governing contract formation.
+4. Self-audit substantive clauses with validate_draft before finishing.
+
+Retrieval budget: use a few search_statutes queries and AT MOST ~10 get_article lookups in total. \
+NEVER enumerate the corpus article-by-article — once you have the governing articles, START DRAFTING."""
 
 
 # ── Orchestrator ─────────────────────────────────────────────────────────────

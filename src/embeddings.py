@@ -88,9 +88,18 @@ class DomainIndex:
     _number_to_idx: dict[str, int] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
-        self._number_to_idx = {
-            str(art["number"]): i for i, art in enumerate(self.articles)
-        }
+        # Keys are numeral-normalized so lookups succeed regardless of whether
+        # the caller (or the LLM) writes "552", "٥٥٢", or "مادة (552)".
+        self._number_to_idx = {}
+        for i, art in enumerate(self.articles):
+            key = self._normalize_number(art["number"])
+            self._number_to_idx.setdefault(key, i)
+
+    @staticmethod
+    def _normalize_number(number: str) -> str:
+        from src.arabic_normalize import normalize_numerals
+
+        return normalize_numerals(str(number)).strip()
 
     # ── Factories ─────────────────────────────────────────────────────────────
 
@@ -187,13 +196,13 @@ class DomainIndex:
         -------
         dict | None
         """
-        idx = self._number_to_idx.get(str(number).strip())
+        idx = self._number_to_idx.get(self._normalize_number(number))
         if idx is None:
             return None
         return self.articles[idx]
 
     def article_exists(self, number: str) -> bool:
-        return str(number).strip() in self._number_to_idx
+        return self._normalize_number(number) in self._number_to_idx
 
 
 # ── Index builder ─────────────────────────────────────────────────────────────

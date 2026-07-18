@@ -452,6 +452,13 @@ class ParalegalOrchestrator:
             body_parts.append(f"User question:\n{question}")
         if contract:
             body_parts.append(f"Contract:\n{contract}")
+        elif task != "draft":
+            body_parts.append(
+                "NO CONTRACT IS ATTACHED. If the question asks to audit, review, or revise "
+                "a contract, do NOT imply any contract was reviewed — state plainly that no "
+                "contract was provided and ask the user to attach one, then answer any "
+                "general legal part of the question from the statute corpus."
+            )
         return ORCHESTRATOR_USER.format(
             task=task,
             body="\n\n".join(body_parts),

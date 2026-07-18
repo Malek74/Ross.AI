@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { X, AlertTriangle, AlertCircle, Info, ChevronDown, ChevronRight, FileText, Loader, Download } from "lucide-react";
 import Markdown from "react-markdown";
 import type { Artifact, Flag, Revision, DraftClause } from "../api/types";
-import { highlightPdf } from "../api/client";
+import { highlightPdf, applyRevisionsPdf } from "../api/client";
 import { useApp } from "../context";
 import type { Strings } from "../i18n";
 
@@ -41,7 +41,13 @@ export default function ArtifactPanel({ artifact, onClose }: Props) {
   const [activeFlag, setActiveFlag] = useState<Flag | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const { s } = useApp();
-  const hasContract = !!artifact.contractText;
+  const draftDocument: string | null =
+    artifact.type === "draft" && artifact.data?.document ? String(artifact.data.document) : null;
+  const hasContract = !!artifact.contractText || !!draftDocument;
+  const allFlags = useMemo(
+    () => Object.values((artifact.data?.flags_by_domain || {}) as Record<string, Flag[]>).flat(),
+    [artifact.data],
+  );
 
   useEffect(() => { setPdfUrl(null); }, [artifact]);
 
@@ -107,14 +113,22 @@ export default function ArtifactPanel({ artifact, onClose }: Props) {
         {activeTab === "report" ? (
           <ReportContent artifact={artifact} activeFlag={activeFlag}
             onFlagClick={(f) => { setActiveFlag(f); if (hasContract) setActiveTab("contract"); }} />
+        ) : draftDocument ? (
+          <RevisedContractPdf contractText={draftDocument} onUrl={setPdfUrl}
+            revisions={[]}
+            fallback={<ContractContent text={draftDocument} activeFlag={null} flags={[]} />} />
+        ) : artifact.type === "revision" && artifact.contractText ? (
+          <RevisedContractPdf contractText={artifact.contractText} onUrl={setPdfUrl}
+            revisions={(artifact.data?.revisions || []) as Revision[]}
+            fallback={<ContractContent text={artifact.contractText} activeFlag={activeFlag} flags={allFlags} />} />
         ) : artifact.file ? (
           <PdfContract file={artifact.file} onUrl={setPdfUrl}
-            flags={Object.values((artifact.data?.flags_by_domain || {}) as Record<string, Flag[]>).flat()}
+            flags={allFlags}
             fallback={<ContractContent text={artifact.contractText || ""} activeFlag={activeFlag}
-              flags={Object.values((artifact.data?.flags_by_domain || {}) as Record<string, Flag[]>).flat()} />} />
+              flags={allFlags} />} />
         ) : (
           <ContractContent text={artifact.contractText || ""} activeFlag={activeFlag}
-            flags={Object.values((artifact.data?.flags_by_domain || {}) as Record<string, Flag[]>).flat()} />
+            flags={allFlags} />
         )}
       </div>
     </div>
@@ -128,7 +142,9 @@ function PdfContract({ file, flags, fallback, onUrl }: { file: File; flags: Flag
   useEffect(() => {
     let alive = true;
     let objectUrl: string | null = null;
-    highlightPdf(file, flags.filter((f) => f.evidence_span).map((f) => ({ evidence_span: f.evidence_span, severity: f.severity || "medium" })))
+    highlightPdf(file, flags
+      .map((f, i) => ({ evidence_span: f.evidence_span, severity: f.severity || "medium", index: i + 1 }))
+      .filter((f) => f.evidence_span))
       .then((r) => {
         if (!alive) { URL.revokeObjectURL(r.url); return; }
         objectUrl = r.url;
@@ -151,7 +167,47 @@ function PdfContract({ file, flags, fallback, onUrl }: { file: File; flags: Flag
       </div>
     );
   }
-  return <iframe src={url} title="contract" className="w-full" style={{ height: "100%", minHeight: 600, border: "none", background: "#fff" }} />;
+  return <iframe src={`${url}#view=FitH`} title="contract" className="w-full" style={{ height: "100%", minHeight: 600, border: "none", background: "#fff" }} />;
+}
+
+function RevisedContractPdf({ contractText, revisions, fallback, onUrl }: {
+  contractText: string; revisions: Revision[]; fallback: React.ReactNode; onUrl?: (url: string | null) => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  // Value-based key: inline `revisions={[...]}` props get a fresh identity every
+  // render — depending on the array itself would re-POST the PDF in a loop.
+  const revKey = JSON.stringify(revisions.map((r) => [r.clause_original, r.clause_revised]));
+
+  useEffect(() => {
+    let alive = true;
+    let objectUrl: string | null = null;
+    const pairs: { clause_original: string; clause_revised: string }[] = JSON.parse(revKey)
+      .map(([o, r]: [string, string]) => ({ clause_original: o, clause_revised: r }));
+    applyRevisionsPdf(contractText, pairs)
+      .then((r) => {
+        if (!alive) { URL.revokeObjectURL(r.url); return; }
+        objectUrl = r.url;
+        setUrl(r.url);
+        onUrl?.(r.url);
+      })
+      .catch(() => { if (alive) setFailed(true); });
+    return () => {
+      alive = false;
+      onUrl?.(null);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [contractText, revKey]);
+
+  if (failed) return <>{fallback}</>;
+  if (!url) {
+    return (
+      <div className="flex items-center justify-center h-full py-16">
+        <Loader size={20} className="animate-spin" style={{ color: "var(--text-muted)" }} />
+      </div>
+    );
+  }
+  return <iframe src={`${url}#view=FitH`} title="revised contract" className="w-full" style={{ height: "100%", minHeight: 600, border: "none", background: "#fff" }} />;
 }
 
 const SEVERITY_MARK: Record<string, { bg: string; border: string }> = {
@@ -378,29 +434,33 @@ function FlagCard({ flag, isActive, onClick }: { flag: Flag; isActive: boolean; 
 function RevisionReport({ data }: { data: any }) {
   const { s } = useApp();
   const revisions: Revision[] = data.revisions || [];
-  const isArabic = revisions.some(r => /[؀-ۿ]/.test(r.clause_original));
+  const isArabic = revisions.some(r => /[؀-ۿ]/.test(r.clause_original || ""));
+  const basisLabel = isArabic ? "السند القانوني" : "Legal basis";
+  const cell: React.CSSProperties = { padding: 10, fontSize: 12, whiteSpace: "pre-wrap", verticalAlign: "top", border: "1px solid #ddd" };
   return (
     <PageShell dir={isArabic ? "rtl" : "ltr"}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {revisions.map((rev, i) => (
-          <div key={i} style={{ border: "1px solid #ddd", borderRadius: 4, overflow: "hidden" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
-              <div style={{ padding: 12, borderRight: "1px solid #ddd" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", marginBottom: 4, color: "#dc2626" }}>{s.original}</div>
-                <p style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{rev.clause_original}</p>
-              </div>
-              <div style={{ padding: 12 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", marginBottom: 4, color: "#16a34a" }}>{s.revised}</div>
-                <p style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{rev.clause_revised}</p>
-              </div>
-            </div>
-            <div style={{ padding: "8px 12px", fontSize: 11, background: "#f5f5f5", borderTop: "1px solid #ddd", color: "#666" }}>
-              <span style={{ color: "#6366f1" }}>{rev.article_ref}</span> — {rev.rationale}
-            </div>
-          </div>
-        ))}
-        {revisions.length === 0 && <p style={{ textAlign: "center", color: "#999", padding: "32px 0" }}>No revisions</p>}
-      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            <th style={{ ...cell, fontSize: 11, fontWeight: 700, color: "#dc2626", background: "#faf5f5" }}>{s.original}</th>
+            <th style={{ ...cell, fontSize: 11, fontWeight: 700, color: "#16a34a", background: "#f5faf5" }}>{s.revised}</th>
+            <th style={{ ...cell, fontSize: 11, fontWeight: 700, color: "#6366f1", background: "#f5f5fa" }}>{basisLabel}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {revisions.map((rev, i) => (
+            <tr key={i}>
+              <td style={cell}>{rev.clause_original}</td>
+              <td style={cell}>{rev.clause_revised}</td>
+              <td style={{ ...cell, fontSize: 11 }}>
+                <span style={{ color: "#6366f1", fontWeight: 700 }}>{rev.article_ref}</span>
+                <div style={{ color: "#666", marginTop: 4 }}>{rev.rationale}</div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {revisions.length === 0 && <p style={{ textAlign: "center", color: "#999", padding: "32px 0" }}>No revisions</p>}
     </PageShell>
   );
 }

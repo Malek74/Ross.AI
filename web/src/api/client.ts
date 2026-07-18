@@ -187,7 +187,7 @@ export async function draftContract(
 
 export async function highlightPdf(
   file: File,
-  flags: { evidence_span: string; severity: string }[],
+  flags: { evidence_span: string; severity: string; index?: number }[],
 ): Promise<{ url: string; count: number }> {
   const form = new FormData();
   form.append("file", file);
@@ -200,6 +200,62 @@ export async function highlightPdf(
   const count = parseInt(res.headers.get("X-Highlight-Count") || "0", 10);
   const blob = await res.blob();
   return { url: URL.createObjectURL(blob), count };
+}
+
+export async function reviseContractStream(
+  contractText: string,
+  domain: string,
+  flagIds: string[] | undefined,
+  lang: string,
+  callbacks: StreamCallbacks,
+): Promise<void> {
+  const res = await fetch(`${BASE}/revise/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contract_text: contractText, domain, flag_ids: flagIds?.length ? flagIds : null, lang }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(body.detail || `Request failed: ${res.status}`);
+  }
+  await consumeSSE(res, callbacks);
+}
+
+export async function draftContractStream(
+  contractType: string,
+  domain: string,
+  requirements: string | undefined,
+  lang: string,
+  callbacks: StreamCallbacks,
+): Promise<void> {
+  const res = await fetch(`${BASE}/draft/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contract_type: contractType, domain, requirements: requirements || null, lang }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(body.detail || `Request failed: ${res.status}`);
+  }
+  await consumeSSE(res, callbacks);
+}
+
+export async function applyRevisionsPdf(
+  contractText: string,
+  revisions: { clause_original: string; clause_revised: string }[],
+): Promise<{ url: string; applied: number }> {
+  const res = await fetch(`${BASE}/apply-revisions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contract_text: contractText, revisions }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(body.detail || `Request failed: ${res.status}`);
+  }
+  const applied = parseInt(res.headers.get("X-Applied-Count") || "0", 10);
+  const blob = await res.blob();
+  return { url: URL.createObjectURL(blob), applied };
 }
 
 export async function classifyIntent(

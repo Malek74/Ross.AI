@@ -130,12 +130,12 @@ def load_tawasul(domain: str = "civil") -> list[Article]:
 _ARTICLE_HEADER = re.compile(
     r"""
     (?:                          # match boundary
-      (?:^|\n)                   # start or newline
+      (?:^|\s)                   # start or ANY whitespace (OCR text often has no newlines)
       (?:مادة|المادة)\s*         # مادة / المادة
       (?:\()?                    # optional open paren
       ([٠-٩0-9]+)               # article number (Arabic-Indic or ASCII)
       (?:\))?                    # optional close paren
-      [\s\-–—:]*                 # separator
+      [\s]*[\-–—:)]              # header separator (excludes prose cross-references)
     )
     """,
     re.VERBOSE,
@@ -276,7 +276,8 @@ def load_official_labour_pdf(pdf_path: Path) -> list[Article]:
     
     if not pdf_path.exists():
         logger.info("Official Labour PDF not found. Downloading...")
-        url = "https://www.labour.gov.eg/media/0iedik3q/%D8%A7%D9%84%D9%82%D8%A7%D9%86%D9%88%D9%86-%D8%B1%D9%82%D9%85-14-%D9%84%D8%B3%D9%86%D8%A9-2025-%D8%A8%D8%A5%D8%B5%D8%AF%D8%A7%D8%B1-%D9%82%D8%A7%D9%86%D9%88%D9%86-%D8%A7%D9%84%D8%B9%D9%85%D9%84.pdf"
+        # labour.gov.eg copy has moved (404) — official-gazette mirror on manshurat.org
+        url = "https://manshurat.org/sites/default/files/qnwn_lml_ljdyd_14_lsn_2025_m_q.pdf"
         try:
             pdf_path.parent.mkdir(parents=True, exist_ok=True)
             urllib.request.urlretrieve(url, pdf_path)
@@ -286,24 +287,43 @@ def load_official_labour_pdf(pdf_path: Path) -> list[Article]:
             return []
 
     logger.info("Extracting official Labour Law 14/2025 from %s", pdf_path)
+    import unicodedata
+
     doc = fitz.open(pdf_path)
-    full_text = []
-    for page in doc:
-        full_text.append(page.get_text())
+    raw_text = "\n".join(page.get_text() for page in doc)
     doc.close()
-    
-    raw_text = "\n".join(full_text)
-    raw_text = clean_ocr(raw_text)
-    
-    # We chunk it using the same header pattern
-    chunks = _chunk_document(raw_text, "قانون العمل 14 لسنة 2025", "labour")
+
+    # Gazette PDFs extract as Arabic presentation forms with REVERSED parens and
+    # (inconsistently) reversed digit runs: article 142 extracts as "مادة)٢٤١(".
+    # NFKC folds the ligatures; digits are disambiguated below by walking the
+    # header sequence, which must ascend one article at a time.
+    text = unicodedata.normalize("NFKC", raw_text)
+    trans = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+    # مادة not preceded by an Arabic letter (excludes بالمادة/للمادة cross-refs)
+    header = re.compile(r"(?<![ء-ي])م\s?ادة\s*\)\s*([0-9٠-٩۰-۹]+)\s*\(\s*:?")
+    matches = list(header.finditer(text))
+
     articles: list[Article] = []
-    for chunk in chunks:
-        raw_ar = chunk["text_ar"]
+    prev = 0
+    for i, m in enumerate(matches):
+        digits = m.group(1).translate(trans)
+        candidates = {int(digits), int(digits[::-1])}
+        if prev + 1 in candidates:
+            num = prev + 1
+        else:
+            bigger = sorted(c for c in candidates if c > prev)
+            num = bigger[0] if bigger else max(candidates)
+        prev = num
+
+        body_start = m.end()
+        body_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        raw_ar = text[body_start:body_end].strip()
+        if not raw_ar:
+            continue
         articles.append(
             {
-                "id": f"labour-official-14-2025-{chunk['number']}",
-                "number": chunk["number"],
+                "id": f"labour-official-14-2025-{num}",
+                "number": str(num),
                 "domain": "labour",
                 "text_ar": normalize_document(raw_ar),
                 "text_en": "",
@@ -311,7 +331,12 @@ def load_official_labour_pdf(pdf_path: Path) -> list[Article]:
                 "source": "official_labour_pdf",
             }
         )
-    logger.info("  Produced %d article chunks from official PDF.", len(articles))
+    logger.info(
+        "  Extracted %d articles (numbers %s → %s) from official Labour Law 14/2025.",
+        len(articles),
+        articles[0]["number"] if articles else "-",
+        articles[-1]["number"] if articles else "-",
+    )
     return articles
 
 
@@ -331,25 +356,46 @@ def load_eval_dataset(repo_id: str = "tarekys5/egyptian_legal_v2") -> list[dict]
     return eval_data
 
 
-def load_tarekys5_as_articles(domain: str) -> list[Article]:
+_QA_ARTICLE_NUM = re.compile(r"مادة\s*(?:الجزء\s+\S+\s*)?\(\s*([٠-٩0-9]+)\s*\)")
+
+
+def load_tarekys5_as_articles(
+    domain: str, exclude_numbers: set[str] | None = None
+) -> list[Article]:
     """
     Extract the tarekys5 Q&A dataset and format it as Articles to be embedded
-    in the FAISS index, as requested by the user.
+    in the FAISS index.
+
+    Rows are filtered by the LAW TITLE in the `article` field (not the Q&A body,
+    which lets other domains' rows leak in), and the real article number is
+    parsed out of that title so citations validate. Rows whose parsed number is
+    in `exclude_numbers` (already covered by statute text) get a "qa-" prefix
+    instead of colliding with the statute row.
     """
     from datasets import load_dataset  # type: ignore
     logger.info("Loading tarekys5/egyptian_legal_v2 to embed for domain '%s' ...", domain)
     ds = load_dataset("tarekys5/egyptian_legal_v2", split="train")
-    
-    keywords = _DOMAIN_FILTER.get(domain, [])
-    
+
+    title_filters = {
+        "labour": ["قانون العمل"],
+        "commercial": ["قانون التجارة", "قانون التجاره"],
+        "civil": ["القانون المدني"],
+    }
+    wanted = title_filters.get(domain, _DOMAIN_FILTER.get(domain, []))
+    exclude_numbers = exclude_numbers or set()
+
     articles: list[Article] = []
     for i, row in enumerate(ds):
-        # We should filter to only include rows relevant to the domain to avoid contamination
-        text = f"{row.get('instruction', '')} {row.get('input', '')} {row.get('output', '')} {row.get('legal_basis', '')}"
-        
-        if not any(kw in text for kw in keywords):
+        title = str(row.get("article") or "")
+        if not any(kw in title for kw in wanted):
             continue
-            
+        m = _QA_ARTICLE_NUM.search(title)
+        if not m:
+            continue
+        from src.arabic_normalize import normalize_numerals
+        parsed_num = normalize_numerals(m.group(1))
+        number = f"qa-{parsed_num}" if parsed_num in exclude_numbers else parsed_num
+
         formatted_text = (
             f"سؤال: {row.get('instruction', '')}\n"
             f"التفاصيل: {row.get('input', '')}\n"
@@ -359,7 +405,7 @@ def load_tarekys5_as_articles(domain: str) -> list[Article]:
         
         articles.append({
             "id": f"tarekys5-qa-{i}",
-            "number": str(row.get("article") or f"qa-{i}"),
+            "number": number,
             "domain": domain,
             "text_ar": normalize_document(formatted_text),
             "text_en": "",
@@ -367,6 +413,15 @@ def load_tarekys5_as_articles(domain: str) -> list[Article]:
             "source": "tarekys5/egyptian_legal_v2"
         })
         
+    # Several Q&A rows can explain the same article — keep the longest per number
+    # so the index has one canonical row per citation target.
+    by_number: dict[str, Article] = {}
+    for art in articles:
+        prev = by_number.get(art["number"])
+        if prev is None or len(art["raw_ar"]) > len(prev["raw_ar"]):
+            by_number[art["number"]] = art
+    articles = list(by_number.values())
+
     logger.info("  Filtered and formatted %d Q&A records for domain '%s'.", len(articles), domain)
     return articles
 
@@ -421,13 +476,14 @@ def _cli() -> None:
     if args.domain == "civil":
         articles = load_tawasul(domain="civil")
     elif args.domain == "labour":
-        articles = load_dataflare(domain="labour")
-        pdf_path = Path("data/law_14_2025.pdf")
-        official_articles = load_official_labour_pdf(pdf_path)
-        articles.extend(official_articles)
-        
-        tarekys_articles = load_tarekys5_as_articles(domain="labour")
-        articles.extend(tarekys_articles)
+        # Labour Law 12/2003 (dataflare) is REPEALED by 14/2025 — the statute
+        # spine is the official gazette PDF; tarekys5 Q&A fills explanations.
+        pdf_path = Path("data/corpus/labour/labour_law_14_2025.pdf")
+        articles = load_official_labour_pdf(pdf_path)
+        official_numbers = {a["number"] for a in articles}
+        articles.extend(
+            load_tarekys5_as_articles(domain="labour", exclude_numbers=official_numbers)
+        )
     elif args.domain == "commercial":
         articles = load_dataflare(domain="commercial")
         tarekys_articles = load_tarekys5_as_articles(domain="commercial")
