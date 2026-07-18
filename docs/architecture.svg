@@ -1,0 +1,197 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 1010" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6366f1"/>
+    </marker>
+  </defs>
+  <style>
+    .layer  { fill:#f8fafc; stroke:#cbd5e1; rx:10; }
+    .box    { fill:#ffffff; stroke:#94a3b8; rx:8; }
+    .accent { fill:#eef2ff; stroke:#6366f1; rx:8; }
+    .live   { fill:#ecfdf5; stroke:#10b981; rx:8; }
+    .warn   { fill:#fffbeb; stroke:#f59e0b; rx:8; }
+    .stub   { fill:#f8fafc; stroke:#cbd5e1; stroke-dasharray:4 3; rx:8; }
+    .data   { fill:#f0f9ff; stroke:#0ea5e9; rx:8; }
+    .t      { font-size:13px; fill:#0f172a; }
+    .ts     { font-size:11px; fill:#475569; }
+    .th     { font-size:14px; font-weight:bold; fill:#0f172a; }
+    .tl     { font-size:12px; font-weight:bold; fill:#64748b; letter-spacing:1px; }
+    .edge   { stroke:#64748b; stroke-width:1.4; fill:none; marker-end:url(#arr); }
+    .edgeb  { stroke:#6366f1; stroke-width:1.6; fill:none; marker-end:url(#arrb); }
+  </style>
+
+  <text x="30" y="34" font-size="20" font-weight="bold" fill="#0f172a">Ross.AI — Egyptian-Law AI Paralegal · Architecture</text>
+  <text x="30" y="54" class="ts">Document/question in → orchestrated domain specialists (LLM-in-a-tool-loop) → cited memo, revisions, or drafted contract out</text>
+
+  <!-- UI layer -->
+  <rect class="layer" x="30" y="75" width="770" height="120"/>
+  <text x="45" y="97" class="tl">REACT UI (web/)</text>
+  <rect class="box" x="45" y="108" width="170" height="70"/>
+  <text x="55" y="128" class="t">Chat (RTL/LTR)</text>
+  <text x="55" y="144" class="ts">intent auto-routing,</text>
+  <text x="55" y="158" class="ts">live step chips (SSE)</text>
+  <rect class="box" x="230" y="108" width="185" height="70"/>
+  <text x="240" y="128" class="t">Artifact Panel</text>
+  <text x="240" y="144" class="ts">Report tab: flags / revision</text>
+  <text x="240" y="158" class="ts">table / draft clauses</text>
+  <rect class="box" x="430" y="108" width="185" height="70"/>
+  <text x="440" y="128" class="t">Contract tab (PDF)</text>
+  <text x="440" y="144" class="ts">highlighted audit PDF ·</text>
+  <text x="440" y="158" class="ts">revised / drafted PDF</text>
+  <rect class="box" x="630" y="108" width="155" height="70"/>
+  <text x="640" y="128" class="t">Specialist picker</text>
+  <text x="640" y="144" class="ts">Auto (classify) or</text>
+  <text x="640" y="158" class="ts">manual domain</text>
+
+  <!-- API layer -->
+  <rect class="layer" x="30" y="225" width="770" height="105"/>
+  <text x="45" y="247" class="tl">FASTAPI (api/main.py)</text>
+  <rect class="box" x="45" y="258" width="250" height="55"/>
+  <text x="55" y="278" class="t">/audit /chat (+ /stream SSE)</text>
+  <text x="55" y="294" class="ts">orchestrated, auto|manual routing</text>
+  <rect class="box" x="310" y="258" width="235" height="55"/>
+  <text x="320" y="278" class="t">/revise /draft (+ /stream)</text>
+  <text x="320" y="294" class="ts">direct specialist, step events</text>
+  <rect class="box" x="560" y="258" width="225" height="55"/>
+  <text x="570" y="278" class="t">/highlight /apply-revisions</text>
+  <text x="570" y="294" class="ts">/intent · /extract · /agents · /cost</text>
+
+  <!-- Orchestrator -->
+  <rect class="layer" x="30" y="360" width="770" height="130"/>
+  <text x="45" y="382" class="tl">PARALEGAL ORCHESTRATOR (src/agents/orchestrator.py) — an agent whose tools are agents</text>
+  <rect class="accent" x="45" y="394" width="215" height="80"/>
+  <text x="55" y="414" class="t">classify()</text>
+  <text x="55" y="430" class="ts">cheap model + registry domain</text>
+  <text x="55" y="444" class="ts">descriptions → ranked hint</text>
+  <text x="55" y="462" class="ts">(embedding fallback: gated off)</text>
+  <rect class="accent" x="275" y="394" width="245" height="80"/>
+  <text x="285" y="414" class="t">consult_specialist(domain)</text>
+  <text x="285" y="430" class="ts">≤2 live specialists, parallel;</text>
+  <text x="285" y="444" class="ts">stubs answer "recognized,</text>
+  <text x="285" y="458" class="ts">not yet available"</text>
+  <rect class="accent" x="535" y="394" width="250" height="80"/>
+  <text x="545" y="414" class="t">synthesize → finish</text>
+  <text x="545" y="430" class="ts">merge / dedupe specialist flags</text>
+  <text x="545" y="444" class="ts">→ one grouped, cited memo</text>
+  <text x="545" y="458" class="ts">(lang-aware: ar / en)</text>
+
+  <!-- Specialists -->
+  <rect class="layer" x="30" y="520" width="770" height="130"/>
+  <text x="45" y="542" class="tl">DOMAIN SPECIALISTS (src/agents/base_agent.py) — one DomainAgent class × {index + playbook}</text>
+  <rect class="live" x="45" y="554" width="170" height="80"/>
+  <text x="55" y="574" class="t">Civil — LIVE</text>
+  <text x="55" y="590" class="ts">TawasulAI, 1,097 articles</text>
+  <text x="55" y="604" class="ts">Civil Code 131/1948</text>
+  <text x="55" y="620" class="ts">playbooks/civil.yaml</text>
+  <rect class="live" x="230" y="554" width="170" height="80"/>
+  <text x="240" y="574" class="t">Labour — LIVE</text>
+  <text x="240" y="590" class="ts">Law 14/2025 gazette (264)</text>
+  <text x="240" y="604" class="ts">+ tarekys5 Q&amp;A (293)</text>
+  <text x="240" y="620" class="ts">playbooks/labour.yaml</text>
+  <rect class="warn" x="415" y="554" width="180" height="80"/>
+  <text x="425" y="574" class="t">Commercial — DATA GAP</text>
+  <text x="425" y="590" class="ts">code text unavailable (73</text>
+  <text x="425" y="604" class="ts">weak rows); needs readable</text>
+  <text x="425" y="620" class="ts">قانون التجارة 17/1999 source</text>
+  <rect class="stub" x="610" y="554" width="175" height="80"/>
+  <text x="620" y="574" class="t">Criminal · Finance — STUB</text>
+  <text x="620" y="590" class="ts">registered, routed,</text>
+  <text x="620" y="604" class="ts">honest "not yet available"</text>
+  <text x="620" y="620" class="ts">add corpus + playbook to go live</text>
+
+  <!-- Tool boundary -->
+  <rect class="layer" x="30" y="680" width="770" height="120"/>
+  <text x="45" y="702" class="tl">TOOL BOUNDARY (src/agents/tools.py) — autonomy over strategy, determinism over integrity</text>
+  <rect class="box" x="45" y="714" width="240" height="72"/>
+  <text x="55" y="734" class="t">search_statutes · get_article</text>
+  <text x="55" y="750" class="ts">scoped to own index · lookup</text>
+  <text x="55" y="764" class="ts">budget 20 · numeral-agnostic (٥٥٢=552)</text>
+  <rect class="box" x="300" y="714" width="250" height="72"/>
+  <text x="310" y="734" class="t">flag_risk · revise_clause ✓validated</text>
+  <text x="310" y="750" class="ts">quote must be a real contract substring;</text>
+  <text x="310" y="764" class="ts">article must exist in the corpus</text>
+  <rect class="box" x="565" y="714" width="220" height="72"/>
+  <text x="575" y="734" class="t">draft_clause · validate_draft · finish</text>
+  <text x="575" y="750" class="ts">clause self-audit against index;</text>
+  <text x="575" y="764" class="ts">max_steps caps the loop</text>
+
+  <!-- Retrieval -->
+  <rect class="layer" x="30" y="830" width="770" height="120"/>
+  <text x="45" y="852" class="tl">GRAPHRAG RETRIEVAL (src/graphrag/ + src/embeddings.py)</text>
+  <rect class="data" x="45" y="864" width="235" height="72"/>
+  <text x="55" y="884" class="t">FAISS vector search</text>
+  <text x="55" y="900" class="ts">qwen3-embedding-8b, dim 4096</text>
+  <text x="55" y="914" class="ts">one index per domain (no mixing)</text>
+  <rect class="data" x="295" y="864" width="245" height="72"/>
+  <text x="305" y="884" class="t">Cross-reference graph expansion</text>
+  <text x="305" y="900" class="ts">top-k seeds → follow "مادة X" edges</text>
+  <text x="305" y="914" class="ts">→ related articles (source=graph)</text>
+  <rect class="data" x="555" y="864" width="230" height="72"/>
+  <text x="565" y="884" class="t">data/index/&lt;domain&gt;/</text>
+  <text x="565" y="900" class="ts">index.faiss · articles.jsonl</text>
+  <text x="565" y="914" class="ts">graph.json · embedding lock</text>
+
+  <!-- Right column: corpus pipeline -->
+  <rect class="layer" x="830" y="75" width="320" height="555"/>
+  <text x="845" y="97" class="tl">CORPUS BUILD (offline)</text>
+  <rect class="data" x="845" y="110" width="290" height="88"/>
+  <text x="855" y="130" class="t">Sources</text>
+  <text x="855" y="146" class="ts">TawasulAI/egyptian-law-articles (civil)</text>
+  <text x="855" y="160" class="ts">Labour Law 14/2025 gazette PDF</text>
+  <text x="855" y="174" class="ts">tarekys5/egyptian_legal_v2 (Q&amp;A)</text>
+  <text x="855" y="188" class="ts">dataflare/egypt-legal-corpus</text>
+  <rect class="box" x="845" y="222" width="290" height="104"/>
+  <text x="855" y="242" class="t">src/corpus_loader.py</text>
+  <text x="855" y="258" class="ts">Arabic normalization (alef/hamza/</text>
+  <text x="855" y="272" class="ts">diacritics/numerals) · OCR cleanup ·</text>
+  <text x="855" y="286" class="ts">article-header chunking · gazette digit-</text>
+  <text x="855" y="300" class="ts">reversal repair · law-title filtering ·</text>
+  <text x="855" y="314" class="ts">dedupe (one row per article)</text>
+  <rect class="box" x="845" y="350" width="290" height="72"/>
+  <text x="855" y="370" class="t">build_corpus.py --domain X --force</text>
+  <text x="855" y="386" class="ts">embed via OpenRouter → FAISS index</text>
+  <text x="855" y="400" class="ts">+ cross-reference graph + smoke test</text>
+  <rect class="box" x="845" y="446" width="290" height="56"/>
+  <text x="855" y="466" class="t">Embedding-consistency rule</text>
+  <text x="855" y="482" class="ts">indexes queried with the SAME model they were built with (lock file)</text>
+  <rect class="accent" x="845" y="526" width="290" height="80"/>
+  <text x="855" y="546" class="t">Adding a domain =</text>
+  <text x="855" y="562" class="ts">corpus + playbook + registry entry.</text>
+  <text x="855" y="576" class="ts">No new retrieval / agent / API code —</text>
+  <text x="855" y="590" class="ts">the agent class is shared.</text>
+
+  <!-- Right column: model gateway -->
+  <rect class="layer" x="830" y="660" width="320" height="150"/>
+  <text x="845" y="682" class="tl">MODEL GATEWAY</text>
+  <rect class="box" x="845" y="694" width="290" height="102"/>
+  <text x="855" y="714" class="t">OpenRouter (one key, OpenAI SDK)</text>
+  <text x="855" y="732" class="ts">LLM: claude-sonnet-4-5 (prod) /</text>
+  <text x="855" y="746" class="ts">gemini-2.5-flash-lite (test)</text>
+  <text x="855" y="760" class="ts">Classifier: gemini flash · Embeddings:</text>
+  <text x="855" y="774" class="ts">qwen3-embedding-8b · retry on 429,</text>
+  <text x="855" y="788" class="ts">allow_fallbacks, cost tracker</text>
+
+  <!-- Evidence rail note -->
+  <rect class="layer" x="830" y="840" width="320" height="110"/>
+  <text x="845" y="862" class="tl">ANTI-HALLUCINATION</text>
+  <text x="845" y="884" class="ts">Every flag/revision must quote a REAL substring</text>
+  <text x="845" y="898" class="ts">of the contract (fuzzy offset match) and cite an</text>
+  <text x="845" y="912" class="ts">article that EXISTS in that specialist's corpus —</text>
+  <text x="845" y="926" class="ts">enforced in code at the tool boundary,</text>
+  <text x="845" y="940" class="ts">not by the prompt.</text>
+
+  <!-- Vertical flow arrows -->
+  <path class="edgeb" d="M 415 195 L 415 225"/>
+  <path class="edgeb" d="M 415 330 L 415 360"/>
+  <path class="edgeb" d="M 415 490 L 415 520"/>
+  <path class="edgeb" d="M 415 650 L 415 680"/>
+  <path class="edgeb" d="M 415 800 L 415 830"/>
+  <!-- corpus feeds indexes -->
+  <path class="edge" d="M 990 630 C 990 650 900 840 790 890"/>
+  <!-- gateway serves agents + embeddings -->
+  <path class="edge" d="M 830 745 C 700 745 640 700 620 690"/>
+  <text x="30" y="985" class="ts">Solid arrows: request flow · grey arrows: offline build feeds indexes / gateway serves LLM+embedding calls · dashed boxes: stubs</text>
+</svg>

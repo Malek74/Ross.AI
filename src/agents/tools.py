@@ -166,7 +166,9 @@ class DomainTools:
             return {"accepted": False, "reason": f"Quote not found in contract (best similarity: {match.similarity:.2f}). Use an exact substring."}
         if not validate_article_ref(article, self.index):
             return {"accepted": False, "reason": "Article does not exist in this specialist's corpus."}
-        cited_article = self.index.get_article(article) or {}
+        cited_article = self._resolve_article(article)
+        if cited_article is None:
+            return {"accepted": False, "reason": "Article does not exist in this specialist's corpus."}
         flag = {
             "check_id": check_id or None, "severity": severity, "evidence_span": quote,
             "quote_match": {"start": match.start, "end": match.end, "similarity": match.similarity},
@@ -230,6 +232,23 @@ class DomainTools:
             return handler(**arguments)
         except (TypeError, ValueError) as exc:
             return {"error": f"Invalid arguments for {name}: {exc}"}
+
+    def _resolve_article(self, ref: str) -> dict[str, Any] | None:
+        """Resolve a model-written ref ('مادة ٥٥٢ من القانون') to an index row.
+
+        Mirrors validate_article_ref: exact lookup first, then each embedded
+        number — so a ref that validates always resolves.
+        """
+        import re
+
+        article = self.index.get_article(ref)
+        if article is not None:
+            return article
+        for num in re.findall(r"\d+", str(ref)):
+            article = self.index.get_article(num)
+            if article is not None:
+                return article
+        return None
 
     @staticmethod
     def _public_article(article: dict[str, Any]) -> dict[str, Any]:
