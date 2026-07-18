@@ -71,7 +71,9 @@ class Settings:
     @property
     def extra_body(self) -> dict[str, Any]:
         """Extra kwargs forwarded to every OpenRouter call."""
-        return {"allow_fallbacks": self.allow_fallbacks}
+        # seed improves run-to-run repeatability on providers that honor it; harmlessly
+        # ignored by those that don't. Pair with allow_fallbacks=false for best stability.
+        return {"allow_fallbacks": self.allow_fallbacks, "seed": 42}
 
 
 settings = Settings()

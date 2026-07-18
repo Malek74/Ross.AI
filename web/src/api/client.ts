@@ -22,13 +22,13 @@ export async function extractText(file: File): Promise<string> {
   return result.text;
 }
 
-export interface StreamCallbacks {
+export interface StreamCallbacks<T = AuditResult> {
   onStep: (step: StepEvent) => void;
-  onDone: (result: AuditResult) => void;
+  onDone: (result: T) => void;
   onError: (error: string) => void;
 }
 
-async function consumeSSE(res: Response, callbacks: StreamCallbacks) {
+async function consumeSSE<T>(res: Response, callbacks: StreamCallbacks<T>) {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -185,6 +185,44 @@ export async function draftContract(
   });
 }
 
+export async function reviseContractStream(
+  contractText: string,
+  domain: string,
+  flagIds: string[] | undefined,
+  lang: string,
+  callbacks: StreamCallbacks<ReviseResult>,
+): Promise<void> {
+  const res = await fetch(`${BASE}/revise/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contract_text: contractText, domain, flag_ids: flagIds?.length ? flagIds : null, lang }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(body.detail || `Request failed: ${res.status}`);
+  }
+  await consumeSSE(res, callbacks);
+}
+
+export async function draftContractStream(
+  contractType: string,
+  domain: string,
+  requirements: string | undefined,
+  lang: string,
+  callbacks: StreamCallbacks<DraftResult>,
+): Promise<void> {
+  const res = await fetch(`${BASE}/draft/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contract_type: contractType, domain, requirements: requirements || null, lang }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(body.detail || `Request failed: ${res.status}`);
+  }
+  await consumeSSE(res, callbacks);
+}
+
 export async function highlightPdf(
   file: File,
   flags: { evidence_span: string; severity: string }[],
@@ -206,7 +244,7 @@ export async function classifyIntent(
   text: string,
   hasContract: boolean,
   hasAudit: boolean,
-): Promise<{ intent: "audit" | "revise" | "draft" | "chat" | null; domain: string | null }> {
+): Promise<{ intent: "audit" | "revise" | "draft" | "chat" | "general" | null; domain: string | null }> {
   return request("/intent", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -78,6 +78,7 @@ export interface ReviseResult {
   summary: string;
   flags: Flag[];
   revisions: Revision[];
+  revised_document?: string;
   status: string;
 }
 
@@ -86,6 +87,7 @@ export interface DraftResult {
   mode: string;
   summary: string;
   drafts: DraftClause[];
+  drafted_document?: string;
   status: string;
 }
 

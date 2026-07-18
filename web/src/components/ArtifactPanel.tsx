@@ -37,11 +37,20 @@ function PageShell({ children, dir }: { children: React.ReactNode; dir?: string 
 }
 
 export default function ArtifactPanel({ artifact, onClose }: Props) {
-  const [activeTab, setActiveTab] = useState<PanelTab>("report");
+  const [activeTab, setActiveTab] = useState<PanelTab>(
+    // For revise/draft the reworked document is the deliverable — open on it, not the diff/cards.
+    (artifact.type === "revision" || artifact.type === "draft") && !!artifact.contractText ? "contract" : "report",
+  );
   const [activeFlag, setActiveFlag] = useState<Flag | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const { s } = useApp();
   const hasContract = !!artifact.contractText;
+  // Stable identity per artifact — inline .flat() produced a fresh array every render,
+  // which re-fired PdfContract's effect and flip-flopped between PDF and text fallback.
+  const contractFlags = useMemo(
+    () => Object.values((artifact.data?.flags_by_domain || {}) as Record<string, Flag[]>).flat(),
+    [artifact],
+  );
 
   useEffect(() => { setPdfUrl(null); }, [artifact]);
 
@@ -109,12 +118,12 @@ export default function ArtifactPanel({ artifact, onClose }: Props) {
             onFlagClick={(f) => { setActiveFlag(f); if (hasContract) setActiveTab("contract"); }} />
         ) : artifact.file ? (
           <PdfContract file={artifact.file} onUrl={setPdfUrl}
-            flags={Object.values((artifact.data?.flags_by_domain || {}) as Record<string, Flag[]>).flat()}
+            flags={contractFlags}
             fallback={<ContractContent text={artifact.contractText || ""} activeFlag={activeFlag}
-              flags={Object.values((artifact.data?.flags_by_domain || {}) as Record<string, Flag[]>).flat()} />} />
+              flags={contractFlags} />} />
         ) : (
           <ContractContent text={artifact.contractText || ""} activeFlag={activeFlag}
-            flags={Object.values((artifact.data?.flags_by_domain || {}) as Record<string, Flag[]>).flat()} />
+            flags={contractFlags} />
         )}
       </div>
     </div>
@@ -124,6 +133,8 @@ export default function ArtifactPanel({ artifact, onClose }: Props) {
 function PdfContract({ file, flags, fallback, onUrl }: { file: File; flags: Flag[]; fallback: React.ReactNode; onUrl?: (url: string | null) => void }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  // Depend on the span content, not the array reference, so we fetch once per real change.
+  const spanKey = flags.map((f) => f.evidence_span).join("|");
 
   useEffect(() => {
     let alive = true;
@@ -141,7 +152,8 @@ function PdfContract({ file, flags, fallback, onUrl }: { file: File; flags: Flag
       onUrl?.(null);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [file, flags]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file, spanKey]);
 
   if (failed) return <>{fallback}</>;
   if (!url) {
@@ -258,10 +270,18 @@ function AuditReport({ data, activeFlag, onFlagClick }: { data: any; activeFlag:
   const domainName = (d: string) => domainNames[d] || d;
   const hasFlags = Object.keys(flagsByDomain).length > 0;
   const isArabic = /[؀-ۿ]/.test((data.summary || "").slice(0, 100));
+  const incomplete = data.status && data.status !== "finished";
+  const incompleteBanner = incomplete ? (
+    <div style={{ fontSize: "12px", padding: "8px 12px", marginBottom: 12, borderRadius: 6,
+      background: "rgba(245, 158, 11, 0.14)", border: "1px solid rgba(245, 158, 11, 0.5)", color: "#b45309" }}>
+      {s.analysisIncomplete}
+    </div>
+  ) : null;
 
   if (!hasFlags && data.summary) {
     return (
       <PageShell dir={isArabic ? "rtl" : "ltr"}>
+        {incompleteBanner}
         {consulted.length > 0 && (
           <div style={{ fontSize: "11px", color: "#888", marginBottom: 16, textAlign: isArabic ? "right" : "left" }}>
             {s.consulted}: {consulted.map(domainName).join("، ")}
@@ -276,6 +296,7 @@ function AuditReport({ data, activeFlag, onFlagClick }: { data: any; activeFlag:
 
   return (
     <div className="p-4 space-y-4">
+      {incompleteBanner}
       {consulted.length > 0 && (
         <div className="text-xs" style={{ color: "var(--text-muted)" }}>{s.consulted}: {consulted.map(domainName).join(", ")}</div>
       )}

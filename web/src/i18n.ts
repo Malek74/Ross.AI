@@ -73,6 +73,8 @@ const strings = {
     history: "Cases",
     newChat: "New chat",
     noHistory: "No conversations yet",
+    analysisIncomplete: "⚠️ The analysis stopped before it finished (step limit reached). This is not a clean bill of health — re-run for full coverage.",
+    capabilities: "I'm Ross.AI, an Egyptian-law paralegal assistant. I can:\n\n- **Audit** a contract for legal risks under Egyptian Civil, Commercial, and Labour law — every flag cites the exact article (Arabic + English) and quotes the offending clause.\n- **Answer** legal questions grounded in the statute corpus, with citations.\n- **Revise** flagged clauses to bring them into compliance.\n- **Draft** a new contract from a type and your requirements.\n\nUpload a contract (PDF, DOCX, or TXT) to start an audit, or just ask me a legal question.",
   },
   ar: {
     heading: "كيف يمكنني مساعدتك؟",
@@ -146,6 +148,8 @@ const strings = {
     history: "القضايا",
     newChat: "محادثة جديدة",
     noHistory: "لا توجد محادثات بعد",
+    analysisIncomplete: "⚠️ توقف التحليل قبل اكتماله (تم بلوغ حد الخطوات). هذا لا يعني خلو العقد من المخاطر — أعد المحاولة للحصول على تغطية كاملة.",
+    capabilities: "أنا Ross.AI، مساعد قانوني متخصص في القانون المصري. يمكنني:\n\n- **فحص** العقد للكشف عن المخاطر القانونية وفقاً للقانون المدني والتجاري وقانون العمل المصري — مع الاستشهاد بالمادة الدقيقة (بالعربية والإنجليزية) واقتباس البند المخالف.\n- **الإجابة** على الأسئلة القانونية استناداً إلى نصوص القوانين، مع الاستشهادات.\n- **تعديل** البنود المخالفة لجعلها متوافقة مع القانون.\n- **صياغة** عقد جديد بناءً على النوع والمتطلبات التي تحددها.\n\nارفع عقداً (PDF أو DOCX أو TXT) لبدء الفحص، أو اطرح عليّ سؤالاً قانونياً.",
   },
 };
 

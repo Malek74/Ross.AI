@@ -102,18 +102,23 @@ async def _extract_uploaded_contract(file: UploadFile) -> str:
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded contract file is empty.")
 
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as temp_file:
-        temp_file.write(contents)
-        temp_file.flush()
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    try:
+        tmp.write(contents)
+        tmp.close()  # release the handle BEFORE load_contract opens it (Windows locks otherwise)
         try:
-            contract = load_contract(temp_file.name)
+            contract = load_contract(tmp.name)
         except UnicodeDecodeError as exc:
             raise HTTPException(status_code=400, detail="Could not decode uploaded text file as UTF-8.") from exc
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Could not extract contract text: {exc}") from exc
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)
+
     if not contract.text.strip():
         raise HTTPException(status_code=400, detail="No text could be extracted from the uploaded contract.")
     return contract.text
+
 
 
 @app.get("/health")
@@ -153,10 +158,11 @@ def chat(request: ChatRequest) -> dict[str, Any]:
     )
 
 
-def _sse_stream(kwargs: dict[str, Any]):
+def _sse_from_events(events):
+    """Wrap any ('event_type', data) generator as an SSE StreamingResponse."""
     def generate():
         try:
-            for event_type, data in ParalegalOrchestrator().run_streaming(**kwargs):
+            for event_type, data in events:
                 yield f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
         except Exception as exc:
             msg = str(exc)
@@ -170,6 +176,10 @@ def _sse_stream(kwargs: dict[str, Any]):
                 error = msg
             yield f"event: error\ndata: {json.dumps({'detail': error}, ensure_ascii=False)}\n\n"
     return StreamingResponse(generate(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+
+def _sse_stream(kwargs: dict[str, Any]):
+    return _sse_from_events(ParalegalOrchestrator().run_streaming(**kwargs))
 
 
 @app.post("/audit/stream")
@@ -207,6 +217,29 @@ def chat_stream(request: ChatRequest):
 @app.get("/agents")
 def agents() -> list[dict[str, Any]]:
     return list_agents()
+
+
+def _resolve_stream_agent(domain: str, method: str):
+    """Return the agent's streaming method, or raise the right HTTP error."""
+    agent = get_agent(domain)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"Unknown domain '{domain}'.")
+    stream_fn = getattr(agent, method, None)
+    if stream_fn is None:
+        raise HTTPException(status_code=501, detail=f"The {domain} specialist does not support this yet.")
+    return stream_fn
+
+
+@app.post("/revise/stream")
+def revise_stream(request: ReviseRequest):
+    stream_fn = _resolve_stream_agent(request.domain, "revise_stream")
+    return _sse_from_events(stream_fn(request.contract_text, request.flag_ids, lang=request.lang))
+
+
+@app.post("/draft/stream")
+def draft_stream(request: DraftRequest):
+    stream_fn = _resolve_stream_agent(request.domain, "draft_stream")
+    return _sse_from_events(stream_fn(request.contract_type, request.requirements or "", lang=request.lang))
 
 
 @app.post("/revise")
@@ -272,7 +305,8 @@ intents:
 - "audit": check/review a contract for legal risks
 - "revise": modify, fix, improve, or suggest changes to an EXISTING contract (e.g. "رشح تعديلات بالعقد", "fix the flagged clauses")
 - "draft": create a NEW contract or new clauses from scratch
-- "chat": a legal question or anything else
+- "general": greetings, small talk, or meta questions about the assistant itself — what it is, who it is, what it can do (e.g. "what can you do", "who are you", "hi", "مرحبا", "ماذا تستطيع أن تفعل")
+- "chat": a substantive legal question about Egyptian law or a submitted contract
 
 domain: the best-fit legal domain — "civil", "commercial", "labour", or null if unclear.
 
@@ -295,7 +329,7 @@ def classify_intent(request: IntentRequest) -> dict[str, Any]:
         parsed = json.loads(raw)
         intent = parsed.get("intent")
         domain = parsed.get("domain")
-        if intent not in {"audit", "revise", "draft", "chat"}:
+        if intent not in {"audit", "revise", "draft", "chat", "general"}:
             intent = None
         if domain not in {"civil", "commercial", "labour"}:
             domain = None

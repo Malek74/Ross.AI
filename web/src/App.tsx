@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { fetchAgents, auditContractStream, chatWithParalegalStream, reviseContract, draftContract, extractText, classifyIntent } from "./api/client";
+import { fetchAgents, auditContractStream, chatWithParalegalStream, reviseContractStream, draftContractStream, extractText, classifyIntent } from "./api/client";
 import type { AgentInfo, AuditResult, ChatMessage, FileAttachment, Artifact, Conversation, StepEvent } from "./api/types";
 import type { Lang } from "./i18n";
 import { t, isRtl } from "./i18n";
@@ -182,7 +182,9 @@ export default function App() {
       const agentsList = routeMode === "manual" && selectedAgents.length ? selectedAgents : undefined;
       const collectedSteps: StepEvent[] = [];
 
-      if (intent === "audit" && hasFiles) {
+      if (intent === "general") {
+        addMessage("assistant", s.capabilities);
+      } else if (intent === "audit" && hasFiles) {
         for (const f of enrichedFiles) {
           if (f.text) setContractText(f.text);
           let gotResponse = false;
@@ -198,17 +200,33 @@ export default function App() {
       } else if (intent === "revise" && (contractText || enrichedFiles[0]?.text)) {
         const domain = selectedAgents[0] || llmDomain || Object.keys(auditResult?.flags_by_domain || {})[0] || detectDomain(text + " " + (contractText || "").slice(0, 500));
         const ct = contractText || enrichedFiles[0]?.text || "";
-        const result = await reviseContract(ct, domain, undefined, lang);
-        const art: Artifact = { type: "revision", title: s.revised, data: result, contractText: ct };
-        setArtifact(art);
-        addMessage("assistant", result.summary, undefined, art);
+        let gotResponse = false;
+        await reviseContractStream(ct, domain, undefined, lang, {
+          onStep: (step) => { collectedSteps.push(step); setLiveSteps([...collectedSteps]); },
+          onDone: (result) => {
+            gotResponse = true;
+            const art: Artifact = { type: "revision", title: s.revised, data: result, contractText: result.revised_document || ct };
+            setArtifact(art);
+            addMessage("assistant", result.summary, undefined, art, collectedSteps);
+          },
+          onError: (err) => { gotResponse = true; addMessage("assistant", friendlyError(err)); },
+        });
+        if (!gotResponse) addMessage("assistant", "No response received from the server.");
       } else if (intent === "draft") {
         const domain = selectedAgents[0] || llmDomain || detectDomain(text);
         const contractType = extractContractType(text);
-        const result = await draftContract(contractType, domain, text, lang);
-        const art: Artifact = { type: "draft", title: `${s.draftContract}: ${contractType}`, data: result };
-        setArtifact(art);
-        addMessage("assistant", result.summary, undefined, art);
+        let gotResponse = false;
+        await draftContractStream(contractType, domain, text, lang, {
+          onStep: (step) => { collectedSteps.push(step); setLiveSteps([...collectedSteps]); },
+          onDone: (result) => {
+            gotResponse = true;
+            const art: Artifact = { type: "draft", title: `${s.draftContract}: ${contractType}`, data: result, contractText: result.drafted_document || result.summary || "" };
+            setArtifact(art);
+            addMessage("assistant", result.summary, undefined, art, collectedSteps);
+          },
+          onError: (err) => { gotResponse = true; addMessage("assistant", friendlyError(err)); },
+        });
+        if (!gotResponse) addMessage("assistant", "No response received from the server.");
       } else {
         const fileTexts = enrichedFiles.map((f) => f.text).filter(Boolean).join("\n\n");
         const ct = contractText || fileTexts || "";
@@ -311,12 +329,14 @@ function detectDomain(text: string): string {
   return "civil";
 }
 
-function detectIntent(text: string, hasFiles: boolean): "audit" | "revise" | "draft" | "chat" {
+function detectIntent(text: string, hasFiles: boolean): "audit" | "revise" | "draft" | "chat" | "general" {
   const lower = text.toLowerCase();
+  const generalPhrases = ["what can you do", "who are you", "what are you", "what do you do", "how do you work", "ماذا تستطيع", "من أنت", "ماذا تفعل"];
   const auditWords = ["audit", "review", "check", "analyze", "scan", "فحص", "مراجعة", "تحليل"];
   const reviseWords = ["revise", "fix", "rewrite", "correct", "changes", "amend", "adjust", "enhance", "improve", "modify", "update", "apply the", "تعديل", "إصلاح", "تصحيح", "التغييرات", "تحسين", "حسّن", "عدّل"];
   const draftWords = ["draft", "create", "generate", "write a contract", "صياغة", "إنشاء"];
 
+  if (!hasFiles && generalPhrases.some((w) => lower.includes(w))) return "general";
   if (auditWords.some((w) => lower.includes(w))) return "audit";
   if (reviseWords.some((w) => lower.includes(w))) return "revise";
   if (draftWords.some((w) => lower.includes(w))) return "draft";
@@ -325,8 +345,19 @@ function detectIntent(text: string, hasFiles: boolean): "audit" | "revise" | "dr
 }
 
 function extractContractType(text: string): string {
-  const patterns = [/draft\s+(?:a\s+)?(\w+(?:\s+\w+)?)\s+contract/i, /create\s+(?:a\s+)?(\w+(?:\s+\w+)?)\s+contract/i, /(\w+)\s+contract/i];
-  for (const p of patterns) { const m = text.match(p); if (m) return m[1]; }
+  const lower = text.toLowerCase();
+  // Infer from the action/subject first — robust to phrasings like "sell my car".
+  if (/\b(sell|buy|sale|purchas|بيع|شراء)/.test(lower)) return "sale";
+  if (/\b(rent|lease|tenan|إيجار|تأجير|إستئجار)/.test(lower)) return "lease";
+  if (/\b(employ|hire|job|salary|wage|توظيف|عمل|راتب)/.test(lower)) return "employment";
+  if (/\b(partner|company|shareholder|شراكة|شركة)/.test(lower)) return "partnership";
+  if (/\b(service|freelance|consult|خدمة|استشار)/.test(lower)) return "service";
+  if (/\b(nda|non-disclosure|confidential|سرية|عدم إفصاح)/.test(lower)) return "non-disclosure";
+  if (/\b(loan|debt|قرض|دين)/.test(lower)) return "loan";
+  // Fallback: the noun immediately before "contract", skipping articles/pronouns.
+  const stop = new Set(["a", "an", "the", "my", "your", "our", "this", "new", "me", "us", "legal"]);
+  const m = text.match(/([A-Za-z؀-ۿ]+)\s+contract/i);
+  if (m && !stop.has(m[1].toLowerCase())) return m[1];
   return "general";
 }
 

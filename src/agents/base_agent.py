@@ -27,6 +27,46 @@ from src.prompt_templates import (
 _ROOT = Path(__file__).resolve().parents[2]
 
 
+def _apply_revisions(contract: str, revisions: list[dict[str, Any]]) -> str:
+    """Return the original contract with each revised clause spliced in at its offset.
+
+    Uses the offsets recorded by validate_quote (quote_match.start/end) so the rest of
+    the document — headings, numbering, spacing — is preserved byte-for-byte. Falls back
+    to a plain string replace when an offset is missing.
+    """
+    if not contract:
+        return ""
+    spans: list[tuple[int, int, str]] = []
+    for rev in revisions:
+        match = rev.get("quote_match") or {}
+        start, end = match.get("start"), match.get("end")
+        revised = rev.get("revised_clause", "")
+        if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(contract):
+            spans.append((start, end, revised))
+    doc = contract
+    if spans:
+        # Apply from the last offset backwards so earlier offsets stay valid.
+        for start, end, revised in sorted(spans, key=lambda s: s[0], reverse=True):
+            doc = doc[:start] + revised + doc[end:]
+        return doc
+    # No usable offsets — best-effort textual replacement.
+    for rev in revisions:
+        original = rev.get("original_clause", "")
+        if original and original in doc:
+            doc = doc.replace(original, rev.get("revised_clause", ""), 1)
+    return doc
+
+
+def _assemble_draft(drafts: list[dict[str, Any]]) -> str:
+    """Assemble drafted clauses into one numbered document body."""
+    parts: list[str] = []
+    for i, draft in enumerate(drafts, 1):
+        text = (draft.get("clause_text") or "").strip()
+        if text:
+            parts.append(f"{i}. {text}")
+    return "\n\n".join(parts)
+
+
 class DomainAgent:
     """An LLM specialist whose strategy is controlled by tool calls, not Python checks."""
 
@@ -96,6 +136,25 @@ class DomainAgent:
         mode: Literal["audit", "chat", "revise", "draft"],
         lang: str = "en",
     ) -> dict[str, Any]:
+        """Synchronous entry point — drains the streaming loop and returns the final result."""
+        result: dict[str, Any] = {}
+        for event_type, data in self._agent_loop_stream(
+            goal=goal, contract=contract, question=question, mode=mode, lang=lang
+        ):
+            if event_type == "done":
+                result = data
+        return result
+
+    def _agent_loop_stream(
+        self,
+        *,
+        goal: str,
+        contract: str,
+        question: str | None,
+        mode: Literal["audit", "chat", "revise", "draft"],
+        lang: str = "en",
+    ):
+        """LLM-in-a-loop that yields ("step", info) events as it works, then ("done", result)."""
         index = self._load_index()
         tools = DomainTools(index=index, contract=contract)
         rubric = self._load_playbook()
@@ -106,10 +165,13 @@ class DomainAgent:
 
         final_text = ""
         trace: list[dict[str, Any]] = []
+        nudges = 0
+        yield ("step", {"action": "thinking", "detail": "Planning..."})
+
         for step in range(settings.agent_max_steps):
             response = create_completion(
                 model=settings.llm_model, messages=messages, tools=tools.definitions(mode=mode),
-                tool_choice="auto", temperature=0.0, max_tokens=2048, extra_body=settings.extra_body,
+                tool_choice="auto", temperature=0.0, max_tokens=4096, extra_body=settings.extra_body,
             )
             tracker.record(response, endpoint=f"specialist:{self.name}")
             message = response.choices[0].message
@@ -118,8 +180,17 @@ class DomainAgent:
             messages.append(message.model_dump(exclude_none=True))
 
             if not message.tool_calls:
+                # The model narrated instead of acting. If it hasn't produced anything
+                # terminal yet, push it to use its tools rather than ending on prose.
+                produced = bool(tools.flags or tools.revisions or tools.drafts) or tools.finished_summary is not None
+                if not produced and nudges < 2:
+                    nudges += 1
+                    messages.append({"role": "user", "content": self._nudge(mode)})
+                    yield ("step", {"action": "thinking", "detail": "Working..."})
+                    continue
                 break
             for call in message.tool_calls:
+                yield ("step", self._describe_tool_step(call.function.name))
                 try:
                     arguments = json.loads(call.function.arguments or "{}")
                 except json.JSONDecodeError:
@@ -134,16 +205,85 @@ class DomainAgent:
 
         if not final_text:
             final_text = "The agent reached its step limit before producing a supported final answer."
+        yield ("done", self._build_result(mode, tools, contract, trace, final_text))
+
+    def _build_result(self, mode, tools, contract, trace, final_text) -> dict[str, Any]:
         result: dict[str, Any] = {
             "domain": self.name, "mode": mode, "summary": final_text,
             "flags": tools.flags, "trace": trace,
             "status": "finished" if tools.finished_summary is not None else "step_limit_or_text_response",
         }
         if tools.revisions:
-            result["revisions"] = tools.revisions
+            # Remap tool-internal keys to the shape the frontend/API contract expects.
+            result["revisions"] = [
+                {
+                    "clause_original": r["original_clause"],
+                    "clause_revised": r["revised_clause"],
+                    "article_ref": r["article_ref"],
+                    "rationale": r["rationale"],
+                }
+                for r in tools.revisions
+            ]
+            # Reworked full contract: splice each revised clause back into the original
+            # text at its recorded offset, preserving all original formatting.
+            reworked = _apply_revisions(contract, tools.revisions)
+            if reworked:
+                result["revised_document"] = reworked
         if tools.drafts:
-            result["drafts"] = tools.drafts
+            result["drafts"] = [
+                {
+                    "topic": d.get("topic"),
+                    "text": d["clause_text"],
+                    "article_ref": d["article_ref"],
+                    "rationale": d["rationale"],
+                }
+                for d in tools.drafts
+            ]
+            assembled = _assemble_draft(tools.drafts)
+            if assembled:
+                result["drafted_document"] = assembled
         return result
+
+    def draft_stream(self, contract_type: str, requirements: str = "", lang: str = "en"):
+        """Streaming variant of draft(): yields ("step", info) events then ("done", result)."""
+        prompt = f"Draft a {contract_type} contract compliant with Egyptian {self.name} law."
+        if requirements:
+            prompt += f" Requirements: {requirements}"
+        yield from self._agent_loop_stream(goal=prompt, contract="", question=prompt, mode="draft", lang=lang)
+
+    def revise_stream(self, contract: str, flag_ids: list[str] | None = None, lang: str = "en"):
+        """Streaming variant of revise(): yields ("step", info) events then ("done", result)."""
+        yield from self._agent_loop_stream(
+            goal=f"Revise the flagged clauses in this contract to comply with {self.name} law. Preserve the original intent. Use revise_clause for each fix, citing the governing article.",
+            contract=contract, question=None, mode="revise", lang=lang,
+        )
+
+    @staticmethod
+    def _nudge(mode: str) -> str:
+        actions = {
+            "draft": "call search_statutes to find governing articles, then draft_clause for EACH clause, then finish",
+            "revise": "call search_statutes then revise_clause for EACH flagged clause, then finish",
+            "audit": "call search_statutes then flag_risk for each issue, then finish",
+            "chat": "call search_statutes to gather authority, then finish with your answer",
+        }
+        return (
+            "Do not narrate your plan in prose. Act now using tool calls only: "
+            + actions.get(mode, actions["audit"])
+            + ". Respond with tool calls, not text."
+        )
+
+    @staticmethod
+    def _describe_tool_step(tool_name: str) -> dict[str, str]:
+        details = {
+            "search_statutes": "Searching statutes...",
+            "get_article": "Reading an article...",
+            "flag_risk": "Flagging a risk...",
+            "revise_clause": "Revising a clause...",
+            "draft_clause": "Drafting a clause...",
+            "validate_draft": "Validating a clause...",
+            "finish": "Finalizing...",
+        }
+        return {"action": tool_name, "detail": details.get(tool_name, f"Running {tool_name}...")}
 
     def _load_index(self) -> DomainIndex:
         root = self.index_path if self.index_path.is_absolute() else _ROOT / self.index_path
